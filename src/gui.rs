@@ -16,10 +16,72 @@ use eframe::egui::{Color32, FontId, RichText, Vec2};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-// ───────────────────────── 主题色 ─────────────────────────
+// ───────────────────────── 设计系统 ─────────────────────────
+// 统一管理颜色 / 字号 / 间距 / 圆角, 避免硬编码散落
 
-const BG: Color32 = Color32::from_rgb(18, 22, 32);
-const PANEL: Color32 = Color32::from_rgb(28, 34, 48);
+/// 主题色板 (根据主题动态返回, 涵盖所有 UI 元素)
+#[derive(Clone)]
+struct Palette {
+    bg: Color32,
+    panel: Color32,
+    panel_hover: Color32,
+    text: Color32,
+    text_dim: Color32,
+    accent: Color32,
+    accent_dim: Color32,
+    success: Color32,
+    warn: Color32,
+    error: Color32,
+    /// 按钮文字色 (在填充背景上)
+    btn_text: Color32,
+    /// 普通按钮背景
+    btn_bg: Color32,
+    /// 拖放遮罩色
+    drop_overlay: Color32,
+    /// 边框/分隔线
+    border: Color32,
+}
+
+impl Palette {
+    fn from(theme: Theme) -> Self {
+        match theme {
+            Theme::Dark => Self {
+                bg: BG,
+                panel: PANEL,
+                panel_hover: Color32::from_rgb(38, 44, 60),
+                text: Color32::from_rgb(230, 235, 245),
+                text_dim: Color32::from_rgb(150, 160, 180),
+                accent: Color32::from_rgb(120, 180, 255),
+                accent_dim: Color32::from_rgb(70, 120, 200),
+                success: Color32::from_rgb(120, 220, 160),
+                warn: Color32::from_rgb(255, 180, 90),
+                error: Color32::from_rgb(255, 110, 110),
+                btn_text: Color32::from_rgb(245, 248, 255),
+                btn_bg: Color32::from_rgb(40, 48, 64),
+                drop_overlay: Color32::from_rgba_premultiplied(120, 180, 255, 40),
+                border: Color32::from_rgb(50, 58, 76),
+            },
+            Theme::Light => Self {
+                bg: Color32::from_rgb(238, 240, 244),
+                panel: Color32::from_rgb(248, 250, 252),
+                panel_hover: Color32::from_rgb(228, 232, 240),
+                text: Color32::from_rgb(30, 34, 42),
+                text_dim: Color32::from_rgb(110, 120, 135),
+                accent: Color32::from_rgb(40, 100, 200),
+                accent_dim: Color32::from_rgb(80, 130, 210),
+                success: Color32::from_rgb(40, 160, 90),
+                warn: Color32::from_rgb(200, 130, 30),
+                error: Color32::from_rgb(200, 60, 60),
+                btn_text: Color32::from_rgb(255, 255, 255),
+                btn_bg: Color32::from_rgb(225, 230, 238),
+                drop_overlay: Color32::from_rgba_premultiplied(40, 100, 200, 30),
+                border: Color32::from_rgb(210, 215, 225),
+            },
+        }
+    }
+}
+
+// ── 兼容别名 (旧代码中直接用 ACCENT/TEXT 等常量的地方逐步替换) ──
 const ACCENT: Color32 = Color32::from_rgb(120, 180, 255);
 const ACCENT_DIM: Color32 = Color32::from_rgb(70, 120, 200);
 const SUCCESS: Color32 = Color32::from_rgb(120, 220, 160);
@@ -27,6 +89,54 @@ const WARN: Color32 = Color32::from_rgb(255, 180, 90);
 const ERROR: Color32 = Color32::from_rgb(255, 110, 110);
 const TEXT: Color32 = Color32::from_rgb(230, 235, 245);
 const TEXT_DIM: Color32 = Color32::from_rgb(150, 160, 180);
+const PANEL: Color32 = Color32::from_rgb(28, 34, 48);
+const BG: Color32 = Color32::from_rgb(18, 22, 32);
+
+/// 统一字号 (基于 egui TextStyle 体系)
+mod ts {
+    use eframe::egui::{FontId, TextStyle};
+
+    /// 注册 TextStyle 到 ctx (在 update 开头调用)
+    pub fn register(ctx: &eframe::egui::Context) {
+        use std::collections::BTreeMap;
+        let mut style = (*ctx.style()).clone();
+        let mut text_styles = BTreeMap::new();
+        text_styles.insert(TextStyle::Heading, FontId::proportional(22.0));
+        text_styles.insert(TextStyle::Name("Title".into()), FontId::proportional(20.0));
+        text_styles.insert(TextStyle::Name("Subtitle".into()), FontId::proportional(13.0));
+        text_styles.insert(TextStyle::Body, FontId::proportional(13.0));
+        text_styles.insert(TextStyle::Name("Button".into()), FontId::proportional(13.0));
+        text_styles.insert(TextStyle::Name("Small".into()), FontId::proportional(11.0));
+        text_styles.insert(TextStyle::Monospace, FontId::monospace(11.0));
+        text_styles.insert(TextStyle::Name("MonoBody".into()), FontId::monospace(12.0));
+        style.text_styles = text_styles;
+        ctx.set_style(style);
+    }
+}
+
+/// 统一间距
+mod sp {
+    pub const XS: f32 = 4.0;
+    pub const SM: f32 = 6.0;
+    pub const MD: f32 = 8.0;
+    pub const LG: f32 = 12.0;
+    pub const XL: f32 = 16.0;
+    pub const XXL: f32 = 24.0;
+}
+
+/// 统一圆角
+mod rd {
+    pub const BUTTON: f32 = 6.0;
+    pub const PANEL: f32 = 10.0;
+    pub const TOAST: f32 = 8.0;
+}
+
+/// 统一按钮高度
+mod bh {
+    pub const SMALL: f32 = 26.0;
+    pub const NORMAL: f32 = 30.0;
+    pub const MAIN: f32 = 40.0;
+}
 
 // ───────────────────────── 消息通道 ─────────────────────────
 
@@ -90,33 +200,6 @@ impl Theme {
     }
 }
 
-/// 主题色板 (根据主题动态返回)
-struct Palette {
-    bg: Color32,
-    panel: Color32,
-    text: Color32,
-    text_dim: Color32,
-}
-
-impl Palette {
-    fn from(theme: Theme) -> Self {
-        match theme {
-            Theme::Dark => Self {
-                bg: BG,
-                panel: PANEL,
-                text: TEXT,
-                text_dim: TEXT_DIM,
-            },
-            Theme::Light => Self {
-                bg: Color32::from_rgb(238, 240, 244),
-                panel: Color32::from_rgb(248, 250, 252),
-                text: Color32::from_rgb(30, 34, 42),
-                text_dim: Color32::from_rgb(110, 120, 135),
-            },
-        }
-    }
-}
-
 impl Mode {
     fn title(&self) -> &'static str {
         match self {
@@ -160,11 +243,13 @@ pub struct App {
     /// 最近使用的文件路径
     recent_files: Vec<String>,
 
-    /// Toast 通知 (消息, 显示截止时间)
-    toast: Option<(String, MsgKind, Instant)>,
+    /// Toast 通知 (消息, 类型, 创建时间, 显示截止时间)
+    toast: Option<(String, MsgKind, Instant, Instant)>,
 
     /// 当前 UI 主题
     theme: Theme,
+    /// 当前主题色板缓存 (每帧 update 开头刷新)
+    pal: Palette,
     /// 压缩/加密后安全删除源文件
     secure_delete: bool,
 
@@ -198,6 +283,7 @@ impl Default for App {
             recent_files: Vec::new(),
             toast: None,
             theme: Theme::Dark,
+            pal: Palette::from(Theme::Dark),
             secure_delete: false,
             tx,
             rx,
@@ -591,7 +677,8 @@ impl App {
 
     /// 显示 Toast 通知 (3秒后自动消失)
     fn show_toast(&mut self, msg: &str, kind: MsgKind) {
-        self.toast = Some((msg.to_string(), kind, Instant::now() + Duration::from_secs(3)));
+        let now = Instant::now();
+        self.toast = Some((msg.to_string(), kind, now, now + Duration::from_secs(3)));
     }
 
     /// 添加最近文件
@@ -1190,12 +1277,18 @@ fn secure_delete_file(path: &std::path::Path) {
 
 impl eframe::App for App {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // 注册统一字号体系
+        ts::register(ctx);
+        // 刷新主题色板
+        self.pal = Palette::from(self.theme);
+        let pal = self.pal.clone();
         self.pump_messages();
         if self.working {
             ctx.request_repaint_after(Duration::from_millis(80));
         }
 
         // ── 拖放支持 ──
+        let hovered = ctx.input(|i| !i.raw.hovered_files.is_empty());
         let dropped = ctx.input(|i| i.raw.dropped_files.clone());
         if !dropped.is_empty() {
             for file in &dropped {
@@ -1231,7 +1324,6 @@ impl eframe::App for App {
         });
 
         // 根据主题设置 visuals
-        let pal = Palette::from(self.theme);
         match self.theme {
             Theme::Dark => {
                 let mut visuals = egui::Visuals::dark();
@@ -1270,6 +1362,20 @@ impl eframe::App for App {
 
                     right_panel(self, ui);
                 });
+
+                if hovered {
+                    let rect = ui.max_rect();
+                    let painter = ui.painter();
+                    painter.rect_filled(rect, 10.0, pal.drop_overlay);
+                    painter.rect_stroke(rect, 10.0, egui::Stroke::new(3.0, pal.accent));
+                    painter.text(
+                        rect.center(),
+                        egui::Align2::CENTER_CENTER,
+                        i18n::t("drag_drop_hint"),
+                        FontId::proportional(24.0),
+                        pal.accent,
+                    );
+                }
             });
 
         // ── 归档列表面板 (浮动窗口) ──
@@ -1302,7 +1408,8 @@ fn title_bar(ui: &mut egui::Ui, app: &mut App) {
                 egui::Button::new(
                     RichText::new(app.theme.icon())
                         .font(FontId::proportional(14.0)),
-                ),
+                )
+                .rounding(rd::BUTTON),
             ).clicked() {
                 app.theme = app.theme.toggle();
             }
@@ -1318,7 +1425,8 @@ fn title_bar(ui: &mut egui::Ui, app: &mut App) {
                 egui::Button::new(
                     RichText::new(btn_label)
                         .font(FontId::proportional(12.0)),
-                ),
+                )
+                .rounding(rd::BUTTON),
             ).clicked() {
                 let new_lang = lang.toggle();
                 i18n::set_lang(new_lang);
@@ -1369,14 +1477,14 @@ fn left_panel(app: &mut App, ui: &mut egui::Ui) {
                         .hint_text(i18n::t("input_hint")),
                 );
                 if app.mode == Mode::Compress {
-                    if ui.add_sized(Vec2::new(68.0, 28.0), egui::Button::new(i18n::t("pick_file"))).clicked() {
+                    if ui.add_sized(Vec2::new(68.0, 28.0), egui::Button::new(i18n::t("pick_file")).rounding(rd::BUTTON)).clicked() {
                         app.pick_input_file();
                     }
-                    if ui.add_sized(Vec2::new(68.0, 28.0), egui::Button::new(i18n::t("pick_dir"))).clicked() {
+                    if ui.add_sized(Vec2::new(68.0, 28.0), egui::Button::new(i18n::t("pick_dir")).rounding(rd::BUTTON)).clicked() {
                         app.pick_input_dir();
                     }
                 } else {
-                    if ui.add_sized(Vec2::new(140.0, 28.0), egui::Button::new(i18n::t("pick_file_btn"))).clicked() {
+                    if ui.add_sized(Vec2::new(140.0, 28.0), egui::Button::new(i18n::t("pick_file_btn")).rounding(rd::BUTTON)).clicked() {
                         app.pick_input_file();
                     }
                 }
@@ -1391,7 +1499,7 @@ fn left_panel(app: &mut App, ui: &mut egui::Ui) {
                     egui::TextEdit::singleline(&mut app.output_path)
                         .hint_text(i18n::t("output_hint")),
                 );
-                if ui.add_sized(Vec2::new(72.0, 28.0), egui::Button::new(i18n::t("browse"))).clicked() {
+                if ui.add_sized(Vec2::new(72.0, 28.0), egui::Button::new(i18n::t("browse")).rounding(rd::BUTTON)).clicked() {
                     match app.mode {
                         Mode::Compress | Mode::Encrypt => app.pick_output_file(),
                         Mode::Decompress | Mode::Decrypt => app.pick_output_dir(),
@@ -1405,10 +1513,11 @@ fn left_panel(app: &mut App, ui: &mut egui::Ui) {
                 ui.horizontal(|ui| {
                     let here_btn = egui::Button::new(
                         RichText::new(i18n::t("extract_here"))
-                            .color(Color32::WHITE)
+                            .color(app.pal.btn_text)
                             .font(FontId::proportional(12.0))
                             .strong(),
                     )
+                    .rounding(rd::BUTTON)
                     .fill(ACCENT_DIM)
                     .min_size(Vec2::new((ui.available_width() - 8.0) / 2.0, 30.0));
                     if ui.add(here_btn).clicked() && !app.working {
@@ -1416,10 +1525,11 @@ fn left_panel(app: &mut App, ui: &mut egui::Ui) {
                     }
                     let to_btn = egui::Button::new(
                         RichText::new(i18n::t("extract_to"))
-                            .color(Color32::WHITE)
+                            .color(app.pal.btn_text)
                             .font(FontId::proportional(12.0))
                             .strong(),
                     )
+                    .rounding(rd::BUTTON)
                     .fill(ACCENT_DIM)
                     .min_size(Vec2::new(ui.available_width(), 30.0));
                     if ui.add(to_btn).clicked() && !app.working {
@@ -1434,6 +1544,7 @@ fn left_panel(app: &mut App, ui: &mut egui::Ui) {
                         RichText::new(i18n::t("list_archive"))
                             .font(FontId::proportional(12.0)),
                     )
+                    .rounding(rd::BUTTON)
                     .min_size(Vec2::new((ui.available_width() - 8.0) / 2.0, 28.0));
                     if ui.add(list_btn).clicked() && !app.working {
                         app.list_archive_gui();
@@ -1442,6 +1553,7 @@ fn left_panel(app: &mut App, ui: &mut egui::Ui) {
                         RichText::new(i18n::t("test_archive"))
                             .font(FontId::proportional(12.0)),
                     )
+                    .rounding(rd::BUTTON)
                     .min_size(Vec2::new(ui.available_width(), 28.0));
                     if ui.add(test_btn).clicked() && !app.working {
                         app.test_archive_gui();
@@ -1530,11 +1642,11 @@ fn left_panel(app: &mut App, ui: &mut egui::Ui) {
                     );
                     // 密码可见性切换按钮
                     let eye = if app.show_password { "🙈" } else { "👁" };
-                    if ui.add_sized(Vec2::new(36.0, 28.0), egui::Button::new(eye)).clicked() {
+                    if ui.add_sized(Vec2::new(36.0, 28.0), egui::Button::new(eye).rounding(rd::BUTTON)).clicked() {
                         app.show_password = !app.show_password;
                     }
                     // 密码生成器按钮
-                    if ui.add_sized(Vec2::new(36.0, 28.0), egui::Button::new("🎲")).clicked() {
+                    if ui.add_sized(Vec2::new(36.0, 28.0), egui::Button::new("🎲").rounding(rd::BUTTON)).clicked() {
                         app.generate_password();
                     }
                 });
@@ -1599,10 +1711,11 @@ fn left_panel(app: &mut App, ui: &mut egui::Ui) {
                 let btn_color = if app.working { ACCENT_DIM } else { ACCENT };
                 let btn = egui::Button::new(
                     RichText::new(btn_text)
-                        .color(Color32::WHITE)
+                        .color(app.pal.btn_text)
                         .font(FontId::proportional(15.0))
                         .strong(),
                 )
+                .rounding(rd::BUTTON)
                 .fill(btn_color)
                 .min_size(Vec2::new(ui.available_width() - 80.0, 40.0));
                 let resp = ui.add(btn);
@@ -1614,9 +1727,10 @@ fn left_panel(app: &mut App, ui: &mut egui::Ui) {
                 if app.working {
                     let cancel_btn = egui::Button::new(
                         RichText::new("✕")
-                            .color(Color32::WHITE)
+                            .color(app.pal.btn_text)
                             .font(FontId::proportional(15.0)),
                     )
+                    .rounding(rd::BUTTON)
                     .fill(ERROR)
                     .min_size(Vec2::new(40.0, 40.0));
                     if ui.add(cancel_btn).clicked() {
@@ -1692,9 +1806,12 @@ fn right_panel(app: &mut App, ui: &mut egui::Ui) {
                     });
                 });
                 ui.add_space(6.0);
+                let bar_color = if app.progress >= 1.0 { app.pal.success } else { app.pal.accent };
                 let bar = egui::ProgressBar::new(app.progress)
-                    .fill(ACCENT)
-                    .desired_width(ui.available_width());
+                    .fill(bar_color)
+                    .rounding(rd::BUTTON)
+                    .desired_width(ui.available_width())
+                    .desired_height(22.0);
                 ui.add(bar);
 
                 // 进度详情: 字节数 + 速度 + ETA
@@ -1899,7 +2016,7 @@ fn archive_list_window(app: &mut App, ctx: &egui::Context) {
 /// Toast 通知覆盖层
 fn show_toast_overlay(app: &mut App, ctx: &egui::Context) {
     // 检查 Toast 是否过期
-    if let Some((_, _, expiry)) = &app.toast {
+    if let Some((_, _, _, expiry)) = &app.toast {
         if Instant::now() >= *expiry {
             app.toast = None;
             return;
@@ -1908,23 +2025,44 @@ fn show_toast_overlay(app: &mut App, ctx: &egui::Context) {
         return;
     }
 
-    let (msg, kind, _) = app.toast.as_ref().unwrap();
-    let color = match kind {
-        MsgKind::Info => ACCENT,
-        MsgKind::Success => SUCCESS,
-        MsgKind::Warn => WARN,
-        MsgKind::Error => ERROR,
+    let (msg, kind, created, expiry) = app.toast.as_ref().unwrap();
+    let now = Instant::now();
+
+    // 淡入淡出: 前 200ms 淡入, 最后 400ms 淡出
+    let fade_in_ms = 200;
+    let fade_out_ms = 400;
+    let total_ms = expiry.duration_since(*created).as_millis() as f32;
+    let elapsed_ms = now.duration_since(*created).as_millis() as f32;
+    let remaining_ms = expiry.duration_since(now).as_millis() as f32;
+
+    let alpha = if elapsed_ms < fade_in_ms as f32 {
+        elapsed_ms / fade_in_ms as f32
+    } else if remaining_ms < fade_out_ms as f32 {
+        remaining_ms / fade_out_ms as f32
+    } else {
+        1.0
     };
+    let alpha = alpha.clamp(0.0, 1.0);
+
+    let base_color = match kind {
+        MsgKind::Info => app.pal.accent,
+        MsgKind::Success => app.pal.success,
+        MsgKind::Warn => app.pal.warn,
+        MsgKind::Error => app.pal.error,
+    };
+    // 应用 alpha
+    let color = linear_color_alpha(base_color, alpha);
+    let bg = linear_color_alpha(app.pal.panel, alpha * 0.95);
 
     egui::Area::new(egui::Id::new("toast_overlay"))
         .order(egui::Order::Foreground)
         .anchor(egui::Align2::RIGHT_TOP, Vec2::new(-20.0, 20.0))
         .show(ctx, |ui| {
             egui::Frame::group(ui.style())
-                .fill(PANEL)
-                .rounding(8.0)
+                .fill(bg)
+                .rounding(rd::TOAST)
                 .stroke(egui::Stroke::new(1.0, color))
-                .inner_margin(egui::Margin::same(12.0))
+                .inner_margin(egui::Margin::same(sp::LG))
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
                         ui.label(RichText::new(msg).color(color).font(FontId::proportional(13.0)));
@@ -1932,8 +2070,19 @@ fn show_toast_overlay(app: &mut App, ctx: &egui::Context) {
                 });
         });
 
-    // 请求重绘以更新过期检查
-    ctx.request_repaint_after(Duration::from_millis(500));
+    // 淡入淡出期间高频重绘, 稳定期低频
+    let repaint_ms = if elapsed_ms < fade_in_ms as f32 || remaining_ms < fade_out_ms as f32 {
+        16
+    } else {
+        200
+    };
+    ctx.request_repaint_after(Duration::from_millis(repaint_ms));
+}
+
+/// 线性插值颜色 alpha (将 RGB 保持, 应用 alpha)
+fn linear_color_alpha(c: Color32, alpha: f32) -> Color32 {
+    let a = (alpha * 255.0).clamp(0.0, 255.0) as u8;
+    Color32::from_rgba_unmultiplied(c.r(), c.g(), c.b(), a)
 }
 
 /// 启动 GUI
