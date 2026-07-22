@@ -6,6 +6,9 @@ use std::io::{self, BufReader, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
+/// 大缓冲区大小: 1MB (默认 BufReader/BufWriter 仅 8KB, 严重拖慢大文件)
+const BUF_SIZE: usize = 1024 * 1024;
+
 /// 递归收集目录下所有文件 (跳过根目录自身)
 fn collect_files(input: &Path) -> Result<Vec<PathBuf>> {
     if input.is_file() {
@@ -42,6 +45,23 @@ fn base_dir(input: &Path) -> &Path {
     }
 }
 
+/// 创建大缓冲区 BufWriter
+fn buf_writer(path: &Path) -> Result<BufWriter<File>> {
+    Ok(BufWriter::with_capacity(BUF_SIZE, File::create(path)?))
+}
+
+/// 创建大缓冲区 BufReader
+fn buf_reader(path: &Path) -> Result<BufReader<File>> {
+    Ok(BufReader::with_capacity(BUF_SIZE, File::open(path)?))
+}
+
+/// 获取可用 CPU 核心数 (用于多线程压缩)
+fn num_cpus() -> u32 {
+    std::thread::available_parallelism()
+        .map(|n| n.get() as u32)
+        .unwrap_or(1)
+}
+
 // ───────────────────────── Zip ─────────────────────────
 
 pub fn zip_compress(
@@ -52,7 +72,7 @@ pub fn zip_compress(
     bar: &Progress,
 ) -> Result<()> {
     let file = File::create(output).with_context(|| format!("创建文件失败: {}", output.display()))?;
-    let mut zip = zip::ZipWriter::new(file);
+    let mut zip = zip::ZipWriter::new(BufWriter::with_capacity(BUF_SIZE, file));
     // 使用 Deflate 算法 (兼容性最好: 7-Zip/WinRAR/Bandizip/系统自带)
     // level 0 = Stored (仅打包), 1-9 = Deflate 压缩级别
     let method = if level <= 0 {
@@ -80,7 +100,8 @@ pub fn zip_compress(
             zip.add_directory(format!("{}/", name), options)?;
         } else {
             zip.start_file(&name, options)?;
-            let mut f = File::open(&entry)?;
+            // 使用大缓冲区读取文件, 加速 IO
+            let mut f = buf_reader(&entry)?;
             io::copy(&mut f, &mut zip)?;
         }
         bar.inc(1);
@@ -102,30 +123,23 @@ pub fn sevenz_compress(
     bar.set_total(entries.len() as u64);
 
     // 将 smart_ex 的 level (0-12) 映射到 LZMA2 preset (0-9)
-    // level 0 = COPY (仅打包), 1-9 = LZMA2 preset 1-9
     let preset = level.clamp(0, 9) as u32;
 
-    // 使用 SevenZWriter Builder API 自定义压缩级别
-    // (compress_to_path 不支持自定义 level, 硬编码 preset 6)
     let mut sz = sevenz_rust::SevenZWriter::create(output)
         .map_err(|e| anyhow::anyhow!("7z 创建 writer 失败: {}", e))?;
 
     if let Some(pwd) = password {
-        // 加密模式: AES 在前, LZMA2 在后 (顺序很重要!)
+        // 加密模式: AES + LZMA2
         sz.set_content_methods(vec![
             sevenz_rust::AesEncoderOptions::new(pwd.into()).into(),
-            sevenz_rust::lzma::LZMA2Options::with_preset(preset).into(),
+            sevenz_rust::lzma::LZMA2Options::with_preset(preset.max(1)).into(),
         ]);
         sz.set_encrypt_header(true);
     } else {
-        if preset == 0 {
-            // level 0: 不压缩, 仅打包 (COPY)
-            sz.set_content_methods(vec![sevenz_rust::SevenZMethod::COPY.into()]);
-        } else {
-            sz.set_content_methods(vec![
-                sevenz_rust::lzma::LZMA2Options::with_preset(preset).into(),
-            ]);
-        }
+        // LZMA2 preset 0-9 (sevenz-rust 不支持 COPY/BCJ 编码, 最低用 preset 1)
+        sz.set_content_methods(vec![
+            sevenz_rust::lzma::LZMA2Options::with_preset(preset.max(1)).into(),
+        ]);
     }
 
     // solid 模式: 多文件一次性压缩, 压缩比更高
@@ -158,7 +172,8 @@ where
         if entry.is_dir() {
             tar.append_dir(relative, &entry)?;
         } else {
-            tar.append_file(relative, &mut File::open(&entry)?)?;
+            let mut f = File::open(&entry)?;
+            tar.append_file(relative, &mut f)?;
         }
         bar.inc(1);
     }
@@ -167,12 +182,12 @@ where
 }
 
 pub fn tar_compress(input: &Path, output: &Path, _level: i32, _pwd: Option<&str>, bar: &Progress) -> Result<()> {
-    let f = File::create(output)?;
+    let f = buf_writer(output)?;
     tar_with_encoder(input, f, bar)
 }
 
 pub fn targz_compress(input: &Path, output: &Path, level: i32, _pwd: Option<&str>, bar: &Progress) -> Result<()> {
-    let f = File::create(output)?;
+    let f = buf_writer(output)?;
     let enc = flate2::write::GzEncoder::new(
         f,
         flate2::Compression::new(level.clamp(1, 9) as u32),
@@ -181,44 +196,45 @@ pub fn targz_compress(input: &Path, output: &Path, level: i32, _pwd: Option<&str
 }
 
 pub fn tarxz_compress(input: &Path, output: &Path, level: i32, _pwd: Option<&str>, bar: &Progress) -> Result<()> {
-    let f = File::create(output)?;
+    let f = buf_writer(output)?;
     let enc = xz2::write::XzEncoder::new(f, level.clamp(0, 9) as u32);
     tar_with_encoder(input, enc, bar)
 }
 
 pub fn tarzst_compress(input: &Path, output: &Path, level: i32, _pwd: Option<&str>, bar: &Progress) -> Result<()> {
-    let f = File::create(output)?;
+    let f = buf_writer(output)?;
     // zstd level 范围 1-22, smart_ex level 0-12 映射到 zstd 1-19
-    // level 0 → zstd 1 (最快), level 3 → zstd 3, level 9 → zstd 19 (最高)
     let zst_level = if level <= 0 {
         1
+    } else if level <= 9 {
+        level
     } else {
-        // 线性映射: 1-9 → 1-19, 10-12 → 20-22
-        if level <= 9 {
-            level
-        } else {
-            19 + (level - 9)
-        }
+        19 + (level - 9)
     };
-    let enc = zstd::stream::Encoder::new(f, zst_level)
-        .map_err(|e| anyhow::anyhow!("zstd 编码器初始化失败: {}", e))?
-        .auto_finish();
+    let mut enc = zstd::stream::Encoder::new(f, zst_level)
+        .map_err(|e| anyhow::anyhow!("zstd 编码器初始化失败: {}", e))?;
+    // 启用多线程编码 (大幅提升大文件压缩速度, 利用所有 CPU 核心)
+    let nthreads = num_cpus();
+    if nthreads > 1 {
+        enc.multithread(nthreads)
+            .map_err(|e| anyhow::anyhow!("zstd 多线程启用失败: {}", e))?;
+    }
+    let enc = enc.auto_finish();
     tar_with_encoder(input, enc, bar)
 }
 
 pub fn tarbz2_compress(input: &Path, output: &Path, level: i32, _pwd: Option<&str>, bar: &Progress) -> Result<()> {
-    let f = File::create(output)?;
+    let f = buf_writer(output)?;
     let enc = bzip2::write::BzEncoder::new(f, bzip2::Compression::new(level.clamp(1, 9) as u32));
     tar_with_encoder(input, enc, bar)
 }
 
 pub fn tarlz4_compress(input: &Path, output: &Path, level: i32, _pwd: Option<&str>, bar: &Progress) -> Result<()> {
-    let f = File::create(output)?;
+    let f = buf_writer(output)?;
     let mut enc = lz4::EncoderBuilder::new()
         .level(level.clamp(1, 12) as u32)
         .build(f)
         .map_err(|e| anyhow::anyhow!("lz4 编码器初始化失败: {}", e))?;
-    // lz4 Encoder 实现了 Write 但不能复用 tar_with_encoder 因为需要 auto_finish
     {
         let mut tar = tar::Builder::new(&mut enc);
         let entries = collect_entries(input)?;
@@ -229,7 +245,8 @@ pub fn tarlz4_compress(input: &Path, output: &Path, level: i32, _pwd: Option<&st
             if entry.is_dir() {
                 tar.append_dir(relative, &entry)?;
             } else {
-                tar.append_file(relative, &mut File::open(&entry)?)?;
+                let mut f = File::open(&entry)?;
+                tar.append_file(relative, &mut f)?;
             }
             bar.inc(1);
         }
@@ -251,12 +268,12 @@ pub fn single_compress(
     bar: &Progress,
 ) -> Result<()> {
     bar.set_total(1);
-    let reader = BufReader::new(File::open(input)?);
-    let writer = BufWriter::new(File::create(output)?);
+    // 使用 1MB 大缓冲区, 加速 IO (默认仅 8KB)
+    let reader = BufReader::with_capacity(BUF_SIZE, File::open(input)?);
+    let writer = BufWriter::with_capacity(BUF_SIZE, File::create(output)?);
 
     match container {
         Container::Single => {
-            // 根据输出扩展名判断算法
             let out_name = output
                 .file_name()
                 .map(|s| s.to_string_lossy().to_lowercase())
@@ -282,8 +299,14 @@ pub fn single_compress(
                 } else {
                     19 + (level - 9)
                 };
-                let enc = zstd::stream::Encoder::new(writer, zst_level)?
-                    .auto_finish();
+                let mut enc = zstd::stream::Encoder::new(writer, zst_level)?;
+                // zstd 单文件也启用多线程
+                let nthreads = num_cpus();
+                if nthreads > 1 {
+                    enc.multithread(nthreads)
+                        .map_err(|e| anyhow::anyhow!("zstd 多线程启用失败: {}", e))?;
+                }
+                let enc = enc.auto_finish();
                 let mut r = reader;
                 let mut enc = enc;
                 io::copy(&mut r, &mut enc)?;

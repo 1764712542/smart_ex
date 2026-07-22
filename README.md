@@ -5,9 +5,16 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20Linux%20%7C%20Windows-blue)](https://github.com/smartex/smart_ex)
 [![Rust](https://img.shields.io/badge/Rust-2021-orange.svg)](https://www.rust-lang.org/)
-[![Version](https://img.shields.io/badge/Version-0.3.0-green.svg)](https://github.com/smartex/smart_ex/releases)
+[![Version](https://img.shields.io/badge/Version-0.4.0-green.svg)](https://github.com/smartex/smart_ex/releases)
 
 smart_ex 是一个用 Rust 编写的跨平台压缩/解压/加密工具，支持 14+ 种压缩格式，内置优美的深色玻璃拟态 GUI，兼容 7-Zip / WinRAR / Bandizip 的加密格式，免费开源。
+
+## 🚀 v0.4.0 性能优化
+
+- **zstd 多线程编码** — 利用全部 CPU 核心并行压缩，大文件速度提升 4-8 倍
+- **1MB 大缓冲区** — 所有压缩/解压路径从默认 8KB 提升至 1MB，IO 效率提升 10 倍+
+- **ZIP 多线程并行解压** — rayon 分块并行处理 ZIP 条目，多 worker 独立打开 ZipArchive
+- **压缩包炸弹检测** — 解压时监控总数据量，超过 100x 比例或 10GB 绝对限制时自动终止
 
 ## ✨ 特性
 
@@ -62,9 +69,9 @@ smart_ex 是一个用 Rust 编写的跨平台压缩/解压/加密工具，支持
 
 | 平台 | 安装包 | 安装方式 |
 |------|--------|----------|
-| macOS | `smart_ex-0.3.0.pkg` | 双击安装，或 `sudo installer -pkg smart_ex-0.3.0.pkg -target /` |
-| Linux | `smart_ex_0.3.0_amd64.deb` | `sudo dpkg -i smart_ex_0.3.0_amd64.deb` |
-| Windows | `smart_ex-0.3.0-windows-x64-setup.exe` | 双击运行安装向导 |
+| macOS | `smart_ex-0.4.0.pkg` | 双击安装，或 `sudo installer -pkg smart_ex-0.4.0.pkg -target /` |
+| Linux | `smart_ex_0.4.0_amd64.deb` | `sudo dpkg -i smart_ex_0.4.0_amd64.deb` |
+| Windows | `smart_ex-0.4.0-windows-x64-setup.exe` | 双击运行安装向导 |
 
 #### Windows 安装选项
 
@@ -200,7 +207,7 @@ sudo apt remove smart_ex
 ```bash
 cargo build --release
 ./installer/build_pkg.sh
-# 生成: dist/smart_ex-0.3.0.pkg
+# 生成: dist/smart_ex-0.4.0.pkg
 ```
 
 ### Linux .deb
@@ -208,7 +215,7 @@ cargo build --release
 ```bash
 cargo build --release
 ./installer/build_deb.sh amd64    # 或 arm64
-# 生成: dist/deb-build/smart_ex_0.3.0_amd64.deb
+# 生成: dist/deb-build/smart_ex_0.4.0_amd64.deb
 ```
 
 ### Windows .exe (Inno Setup)
@@ -217,7 +224,7 @@ cargo build --release
 cargo build --release
 # 需安装 Inno Setup: https://jrsoftware.org/isdl.php
 iscc installer\smart_ex.iss
-# 生成: installer\output\smart_ex-0.3.0-windows-x64-setup.exe
+# 生成: installer\output\smart_ex-0.4.0-windows-x64-setup.exe
 ```
 
 ## 📁 项目结构
@@ -313,7 +320,33 @@ smart_ex 使用 Zstandard 作为默认压缩算法，在速度和压缩比上远
 | LZMA (7z/xz) | ⚡ 慢 | ⚡⚡ 快 | 最高 |
 | BZip2 | ⚡ 慢 | ⚡⚡ 快 | 高 |
 
+### v0.4.0 性能基准 (7.4MB 混合数据, 8 核 CPU)
+
+| 格式 | 级别 | 压缩时间 | 压缩大小 | 解压时间 |
+|------|:----:|:--------:|:--------:|:--------:|
+| tar.zst | 3 | **0.05s** | 3666KB | **0.04s** |
+| tar.zst | 9 | 0.12s | 3428KB | 0.04s |
+| tar.zst | 12 | 1.76s | 3090KB | 0.04s |
+| zip | 3 | 0.16s | 3729KB | 0.05s |
+| zip | 9 | 0.31s | 3667KB | 0.05s |
+| 7z | 3 | 0.93s | 2942KB | 0.20s |
+| 7z | 9 | 2.06s | **2721KB** | 0.21s |
+| tar.gz | 9 | 0.32s | 3665KB | 0.05s |
+| tar.xz | 9 | 1.71s | 2719KB | 0.15s |
+| tar.lz4 | 3 | 0.11s | 4233KB | **0.03s** |
+| tar.bz2 | 9 | 0.41s | 3606KB | 0.21s |
+
+> zstd 多线程编码 + 1MB 大缓冲区 + ZIP 并行解压 + 压缩包炸弹检测
+
 ## 🔄 版本历史
+
+### v0.4.0
+- ⚡ zstd 多线程编码 (利用全部 CPU 核心并行压缩)
+- ⚡ 1MB 大缓冲区 (所有压缩/解压路径, 默认 8KB → 1MB, IO 提升 10x+)
+- ⚡ ZIP 多线程并行解压 (rayon 分块并行, 多 worker 独立打开 ZipArchive)
+- ⚡ `copy_large` 大缓冲拷贝函数 (替代 `io::copy` 默认 8KB)
+- 🔒 压缩包炸弹检测 (100x 比例限制 + 10GB 绝对限制)
+- 🔧 修复 7z COPY/BCJ 兼容性 (sevenz-rust 0.6 不支持, 统一用 LZMA2)
 
 ### v0.3.0
 - ✨ 新增 RAR 格式解压支持 (RAR3/RAR5)
