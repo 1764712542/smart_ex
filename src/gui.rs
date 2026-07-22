@@ -451,6 +451,18 @@ fn friendly_error(e: anyhow::Error) -> anyhow::Error {
     }
 }
 
+/// 创建带 GUI 实时进度回调的 Progress
+fn make_progress(tx: &Sender<WorkMsg>) -> crate::progress::Progress {
+    let tx_clone = tx.clone();
+    let callback: crate::progress::ProgressCallback = std::sync::Arc::new(move |cur, total| {
+        if total > 0 {
+            let pct = cur as f32 / total as f32;
+            let _ = tx_clone.send(WorkMsg::Progress(pct.min(1.0)));
+        }
+    });
+    crate::progress::Progress::new_with_callback("", callback)
+}
+
 fn run_task(
     mode: Mode,
     input: String,
@@ -470,7 +482,7 @@ fn run_task(
                 PathBuf::from(output)
             };
             let start = Instant::now();
-            let bar = crate::progress::Progress::new("");
+            let bar = make_progress(&tx);
             let _ = tx.send(WorkMsg::Log(
                 format!(
                     "  {}: {}, {}: {}",
@@ -488,7 +500,6 @@ fn run_task(
                 None
             };
             compress::compress(inp, &out_path, container, level, archive_pwd, &bar)?;
-            let _ = tx.send(WorkMsg::Progress(0.6));
 
             let mut final_path = out_path.clone();
             // 对不支持内嵌加密的容器, 退回 .enc 包装
@@ -550,7 +561,7 @@ fn run_task(
 
             if detect(&archive_path).is_some() {
                 std::fs::create_dir_all(&out_dir)?;
-                let bar = crate::progress::Progress::new("");
+                let bar = make_progress(&tx);
                 // 传递密码给归档解压 (zip/7z/rar 加密归档)
                 decompress::decompress_with_password(&archive_path, &out_dir, pwd_opt, &bar)?;
                 let _ = tx.send(WorkMsg::Progress(0.95));
@@ -606,7 +617,7 @@ fn run_task(
                 ));
                 let extract_dir = out_path.with_extension("");
                 std::fs::create_dir_all(&extract_dir)?;
-                let bar = crate::progress::Progress::new("");
+                let bar = make_progress(&tx);
                 decompress::decompress_with_password(&out_path, &extract_dir, None, &bar)?;
                 let _ = std::fs::remove_file(&out_path);
             }
@@ -658,7 +669,6 @@ fn run_extract_task(
         ));
         let tmp = PathBuf::from(format!("{}.tmp", inp.display()));
         crypto::decrypt_file(inp, &tmp, pwd_opt.unwrap())?;
-        let _ = tx.send(WorkMsg::Progress(0.5));
         tmp
     } else {
         inp.to_path_buf()
@@ -666,9 +676,8 @@ fn run_extract_task(
 
     let start = Instant::now();
     if detect(&archive_path).is_some() {
-        let bar = crate::progress::Progress::new("");
+        let bar = make_progress(&tx);
         decompress::decompress_with_password(&archive_path, &out_dir, pwd_opt, &bar)?;
-        let _ = tx.send(WorkMsg::Progress(0.95));
         if archive_path != inp {
             let _ = std::fs::remove_file(&archive_path);
         }
@@ -1100,18 +1109,23 @@ fn right_panel(app: &mut App, ui: &mut egui::Ui) {
                                 MsgKind::Warn => WARN,
                                 MsgKind::Error => ERROR,
                             };
+                            // 时间戳 + 日志文本在同一行, 长文本自动换行
+                            // 使用 horizontal_wrapped 确保超长行不会溢出边界
                             ui.horizontal_wrapped(|ui| {
+                                ui.spacing_mut().item_spacing.x = 6.0;
                                 ui.label(
                                     RichText::new(&entry.time)
                                         .color(TEXT_DIM)
                                         .font(FontId::monospace(11.0)),
                                 );
+                                // 日志文本占满剩余宽度, 自动换行
                                 ui.label(
                                     RichText::new(&entry.text)
                                         .color(color)
                                         .font(FontId::monospace(12.0)),
                                 );
                             });
+                            ui.add_space(2.0);
                         }
                     });
             });

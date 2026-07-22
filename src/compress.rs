@@ -53,15 +53,16 @@ pub fn zip_compress(
 ) -> Result<()> {
     let file = File::create(output).with_context(|| format!("创建文件失败: {}", output.display()))?;
     let mut zip = zip::ZipWriter::new(file);
-    // 使用 zstd 作为默认算法: 速度远超 deflate, 压缩比更优
+    // 使用 Deflate 算法 (兼容性最好: 7-Zip/WinRAR/Bandizip/系统自带)
+    // level 0 = Stored (仅打包), 1-9 = Deflate 压缩级别
     let method = if level <= 0 {
         zip::CompressionMethod::Stored
     } else {
-        zip::CompressionMethod::Zstd
+        zip::CompressionMethod::Deflated
     };
     let mut options = zip::write::SimpleFileOptions::default()
         .compression_method(method)
-        .compression_level(Some(level as i64));
+        .compression_level(Some(level.clamp(0, 9) as i64));
 
     // 如果有密码, 启用 AES-256 加密 (兼容 7-Zip/WinRAR/Bandizip)
     if let Some(pwd) = password {
@@ -93,19 +94,46 @@ pub fn zip_compress(
 pub fn sevenz_compress(
     input: &Path,
     output: &Path,
-    _level: i32,
+    level: i32,
     password: Option<&str>,
     bar: &Progress,
 ) -> Result<()> {
     let entries = collect_files(input)?;
     bar.set_total(entries.len() as u64);
 
-    let result = if let Some(pwd) = password {
-        sevenz_rust::compress_to_path_encrypted(input, output, pwd.into())
+    // 将 smart_ex 的 level (0-12) 映射到 LZMA2 preset (0-9)
+    // level 0 = COPY (仅打包), 1-9 = LZMA2 preset 1-9
+    let preset = level.clamp(0, 9) as u32;
+
+    // 使用 SevenZWriter Builder API 自定义压缩级别
+    // (compress_to_path 不支持自定义 level, 硬编码 preset 6)
+    let mut sz = sevenz_rust::SevenZWriter::create(output)
+        .map_err(|e| anyhow::anyhow!("7z 创建 writer 失败: {}", e))?;
+
+    if let Some(pwd) = password {
+        // 加密模式: AES 在前, LZMA2 在后 (顺序很重要!)
+        sz.set_content_methods(vec![
+            sevenz_rust::AesEncoderOptions::new(pwd.into()).into(),
+            sevenz_rust::lzma::LZMA2Options::with_preset(preset).into(),
+        ]);
+        sz.set_encrypt_header(true);
     } else {
-        sevenz_rust::compress_to_path(input, output)
-    };
-    result.map_err(|e| anyhow::anyhow!("7z 压缩失败: {}", e))?;
+        if preset == 0 {
+            // level 0: 不压缩, 仅打包 (COPY)
+            sz.set_content_methods(vec![sevenz_rust::SevenZMethod::COPY.into()]);
+        } else {
+            sz.set_content_methods(vec![
+                sevenz_rust::lzma::LZMA2Options::with_preset(preset).into(),
+            ]);
+        }
+    }
+
+    // solid 模式: 多文件一次性压缩, 压缩比更高
+    sz.push_source_path(input, |_| true)
+        .map_err(|e| anyhow::anyhow!("7z 压缩失败: {}", e))?;
+
+    sz.finish()
+        .map_err(|e| anyhow::anyhow!("7z 完成失败: {}", e))?;
 
     // sevenz-rust 一次性压缩, 进度直接置满
     for _ in 0..entries.len() {
@@ -160,8 +188,18 @@ pub fn tarxz_compress(input: &Path, output: &Path, level: i32, _pwd: Option<&str
 
 pub fn tarzst_compress(input: &Path, output: &Path, level: i32, _pwd: Option<&str>, bar: &Progress) -> Result<()> {
     let f = File::create(output)?;
-    // zstd level 范围 1-22, 我们将 0-9 映射到 1-19
-    let zst_level = (level.max(1) * 2).min(19) as i32;
+    // zstd level 范围 1-22, smart_ex level 0-12 映射到 zstd 1-19
+    // level 0 → zstd 1 (最快), level 3 → zstd 3, level 9 → zstd 19 (最高)
+    let zst_level = if level <= 0 {
+        1
+    } else {
+        // 线性映射: 1-9 → 1-19, 10-12 → 20-22
+        if level <= 9 {
+            level
+        } else {
+            19 + (level - 9)
+        }
+    };
     let enc = zstd::stream::Encoder::new(f, zst_level)
         .map_err(|e| anyhow::anyhow!("zstd 编码器初始化失败: {}", e))?
         .auto_finish();
@@ -237,7 +275,13 @@ pub fn single_compress(
                 io::copy(&mut r, &mut enc)?;
                 enc.finish()?;
             } else if out_name.ends_with(".zst") {
-                let zst_level = (level.max(1) * 2).min(19) as i32;
+                let zst_level = if level <= 0 {
+                    1
+                } else if level <= 9 {
+                    level
+                } else {
+                    19 + (level - 9)
+                };
                 let enc = zstd::stream::Encoder::new(writer, zst_level)?
                     .auto_finish();
                 let mut r = reader;
