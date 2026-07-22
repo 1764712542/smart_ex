@@ -8,6 +8,8 @@ Cargo.lock
 # Build artifacts
 /dist/
 /installer/output/
+# Tauri 自动生成的 schema 文件
+/crates/smartex-tauri/gen/
 
 # OS files
 .DS_Store

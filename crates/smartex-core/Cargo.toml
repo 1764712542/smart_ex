@@ -1,0 +1,42 @@
+[package]
+name = "smartex-core"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+
+[dependencies]
+# 压缩
+zip = { version = "2.2", features = ["aes-crypto", "deflate", "deflate64", "bzip2", "zstd", "lzma", "time"] }
+tar = "0.4"
+flate2 = "1.0"
+zstd = { version = "0.13", features = ["zstdmt"] }
+lz4 = "1.28"
+xz2 = "0.1"
+bzip2 = "0.4"
+sevenz-rust = { version = "0.6", features = ["aes256"] }
+unrar = "0.5"
+
+# 编码
+encoding_rs = "0.8"
+
+# 加密
+aes-gcm = "0.10"
+argon2 = "0.5"
+rand = "0.8"
+zeroize = { version = "1.8", features = ["derive"] }
+
+# 并行
+rayon = "1.10"
+
+# 工具
+anyhow = "1.0"
+thiserror = "1.0"
+walkdir = "2.5"
+crossbeam-channel = "0.5"
+chrono = "0.4"
+indicatif = "0.17"
+
+# 序列化 (供 Tauri IPC 用)
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

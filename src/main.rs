@@ -1,21 +1,14 @@
 use anyhow::Result;
 use clap::Parser;
-use cli::{Cli, Commands};
-use format::Container;
-use i18n::Lang;
-use progress::Progress;
+use smartex_core::format::Container;
+use smartex_core::i18n::Lang;
+use smartex_core::progress::Progress;
 use std::path::PathBuf;
 
-mod archive_list;
 mod cli;
-mod compress;
-mod crypto;
-mod decompress;
-mod format;
-mod gui;
-mod i18n;
-mod progress;
-mod rar;
+use cli::{Cli, Commands};
+
+use smartex_core::{archive_list, compress, crypto, decompress, format, i18n, progress};
 
 fn main() -> Result<()> {
     let args = Cli::parse();
@@ -23,14 +16,18 @@ fn main() -> Result<()> {
     // 初始化语言 (zh / en)
     i18n::set_lang(Lang::from_code(&args.lang));
 
-    // 无子命令 + --gui 或完全无参数 → 启动 GUI
+    // 无子命令 + --gui 或完全无参数 → GUI 模式 (Tauri 版本尚未就绪)
     if args.gui || args.command.is_none() {
-        return gui::run().map_err(|e| anyhow::anyhow!("GUI 启动失败: {}", e));
+        println!("GUI 模式将在 Tauri 版本中提供, 请使用 CLI 命令 (smart_ex --help)");
+        return Ok(());
     }
 
     let cmd = args.command.unwrap();
     match cmd {
-        Commands::Gui => gui::run().map_err(|e| anyhow::anyhow!("GUI 启动失败: {}", e)),
+        Commands::Gui => {
+            println!("GUI 模式将在 Tauri 版本中提供, 请使用 CLI 命令 (smart_ex --help)");
+            Ok(())
+        }
         Commands::Compress {
             input,
             output,

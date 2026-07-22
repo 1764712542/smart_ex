@@ -1,58 +1,30 @@
-[package]
-name = "smart_ex"
-version = "0.5.0"
+[workspace]
+members = ["crates/smartex-core", "crates/smartex-tauri", "."]
+resolver = "2"
+
+[workspace.package]
+version = "0.6.0"
 edition = "2021"
 authors = ["smart_ex"]
-description = "Smart compression/decompression with encryption and a polished GUI — supports 14+ formats including RAR"
 license = "MIT"
+
+[package]
+name = "smart_ex"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
 
 [[bin]]
 name = "smart_ex"
 path = "src/main.rs"
 
 [dependencies]
-# CLI
+smartex-core = { path = "crates/smartex-core" }
 clap = { version = "4.5", features = ["derive"] }
-
-# Compression — zip with AES-256 + ZipCrypto decryption
-zip = { version = "2.2", features = ["aes-crypto", "deflate", "deflate64", "bzip2", "zstd", "lzma", "time"] }
-tar = "0.4"
-flate2 = "1.0"
-zstd = { version = "0.13", features = ["zstdmt"] }
-lz4 = "1.28"
-xz2 = "0.1"
-bzip2 = "0.4"
-
-# 7z with AES-256 encryption support
-sevenz-rust = { version = "0.6", features = ["aes256"] }
-
-# RAR (bundled unRAR C library — no system dep)
-unrar = "0.5"
-
-# Character encoding (GBK / Shift-JIS → UTF-8 for ZIP entries)
-encoding_rs = "0.8"
-
-# Encryption (smart_ex native .enc format)
-aes-gcm = "0.10"
-argon2 = "0.5"
-rand = "0.8"
-zeroize = { version = "1.8", features = ["derive"] }
-
-# Parallel
-rayon = "1.10"
-
-# GUI
-eframe = "0.29"
-egui = "0.29"
 rfd = "0.15"
-
-# Error handling & utils
-anyhow = "1.0"
-thiserror = "1.0"
-walkdir = "2.5"
 indicatif = "0.17"
-crossbeam-channel = "0.5"
-chrono = "0.4"
+anyhow = "1.0"
 
 [profile.release]
 opt-level = 3
