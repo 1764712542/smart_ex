@@ -12,7 +12,7 @@ use crate::i18n::{self, Lang};
 use crate::archive_list::ArchiveEntry;
 use crossbeam_channel::{unbounded, Receiver, Sender};
 use eframe::egui;
-use eframe::egui::{Color32, FontId, RichText, Vec2};
+use eframe::egui::{Color32, FontId, RichText, TextStyle, Vec2};
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -81,13 +81,20 @@ impl Palette {
     }
 }
 
-// ── 兼容别名 (旧代码中直接用 ACCENT/TEXT 等常量的地方逐步替换) ──
+// ── 兼容别名 (仅 Palette::from 内部使用, UI 代码统一走 pal) ──
+#[allow(dead_code)]
 const ACCENT: Color32 = Color32::from_rgb(120, 180, 255);
+#[allow(dead_code)]
 const ACCENT_DIM: Color32 = Color32::from_rgb(70, 120, 200);
+#[allow(dead_code)]
 const SUCCESS: Color32 = Color32::from_rgb(120, 220, 160);
+#[allow(dead_code)]
 const WARN: Color32 = Color32::from_rgb(255, 180, 90);
+#[allow(dead_code)]
 const ERROR: Color32 = Color32::from_rgb(255, 110, 110);
+#[allow(dead_code)]
 const TEXT: Color32 = Color32::from_rgb(230, 235, 245);
+#[allow(dead_code)]
 const TEXT_DIM: Color32 = Color32::from_rgb(150, 160, 180);
 const PANEL: Color32 = Color32::from_rgb(28, 34, 48);
 const BG: Color32 = Color32::from_rgb(18, 22, 32);
@@ -1339,44 +1346,132 @@ impl eframe::App for App {
             }
         }
 
-        egui::CentralPanel::default()
-            .frame(egui::Frame::group(ctx.style().as_ref()).fill(pal.bg).inner_margin(egui::Margin::same(16.0)))
+        // ── 顶部栏: 品牌 + Tab + 工具按钮 ──
+        egui::TopBottomPanel::top("header")
+            .exact_height(56.0)
+            .frame(
+                egui::Frame::none()
+                    .fill(pal.panel)
+                    .stroke(egui::Stroke::new(1.0, pal.border))
+                    .inner_margin(egui::Margin::symmetric(sp::XL, sp::SM)),
+            )
             .show(ctx, |ui| {
-                title_bar(ui, self);
-
-                ui.add_space(8.0);
-
-                mode_tabs(self, ui);
-
-                ui.add_space(12.0);
-
-                ui.horizontal(|ui| {
-                    let left_width = (ui.available_width() * 0.46).max(360.0);
-                    ui.allocate_ui_with_layout(
-                        Vec2::new(left_width, ui.available_height()),
-                        egui::Layout::top_down(egui::Align::LEFT),
-                        |ui| left_panel(self, ui),
+                ui.horizontal_centered(|ui| {
+                    ui.spacing_mut().item_spacing.x = sp::SM;
+                    // 品牌
+                    ui.label(
+                        RichText::new(i18n::t("app_name"))
+                            .color(pal.accent)
+                            .text_style(TextStyle::Name("Title".into()))
+                            .strong(),
                     );
-
-                    ui.separator();
-
-                    right_panel(self, ui);
+                    ui.label(
+                        RichText::new(i18n::t("app_tagline"))
+                            .color(pal.text_dim)
+                            .text_style(TextStyle::Name("Subtitle".into())),
+                    );
+                    ui.add_space(sp::XL);
+                    // 模式 Tab
+                    let modes = [Mode::Compress, Mode::Decompress, Mode::Encrypt, Mode::Decrypt];
+                    for m in modes {
+                        let selected = self.mode == m;
+                        let txt = RichText::new(m.title())
+                            .text_style(TextStyle::Name("Button".into()))
+                            .strong();
+                        let btn = egui::SelectableLabel::new(selected, txt);
+                        let resp = ui.add_sized(Vec2::new(120.0, 34.0), btn);
+                        if resp.clicked() && !self.working {
+                            self.switch_mode(m);
+                        }
+                        if selected {
+                            resp.highlight();
+                        }
+                    }
+                    // 右侧工具按钮
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        // 主题切换按钮
+                        if ui
+                            .add_sized(
+                                Vec2::new(40.0, bh::NORMAL),
+                                egui::Button::new(
+                                    RichText::new(self.theme.icon())
+                                        .text_style(TextStyle::Name("Button".into())),
+                                )
+                                .rounding(rd::BUTTON),
+                            )
+                            .clicked()
+                        {
+                            self.theme = self.theme.toggle();
+                        }
+                        ui.add_space(sp::XS);
+                        // 语言切换按钮
+                        let lang = i18n::current_lang();
+                        let btn_label = match lang {
+                            Lang::Zh => "🌐 EN",
+                            Lang::En => "🌐 中文",
+                        };
+                        if ui
+                            .add_sized(
+                                Vec2::new(72.0, bh::NORMAL),
+                                egui::Button::new(
+                                    RichText::new(btn_label).text_style(TextStyle::Name("Button".into())),
+                                )
+                                .rounding(rd::BUTTON),
+                            )
+                            .clicked()
+                        {
+                            let new_lang = lang.toggle();
+                            i18n::set_lang(new_lang);
+                            self.status_text = i18n::t("ready").to_string();
+                        }
+                        ui.add_space(sp::SM);
+                        ui.label(
+                            RichText::new(i18n::t("app_version"))
+                                .color(pal.text_dim)
+                                .text_style(TextStyle::Name("Small".into())),
+                        );
+                    });
                 });
-
-                if hovered {
-                    let rect = ui.max_rect();
-                    let painter = ui.painter();
-                    painter.rect_filled(rect, 10.0, pal.drop_overlay);
-                    painter.rect_stroke(rect, 10.0, egui::Stroke::new(3.0, pal.accent));
-                    painter.text(
-                        rect.center(),
-                        egui::Align2::CENTER_CENTER,
-                        i18n::t("drag_drop_hint"),
-                        FontId::proportional(24.0),
-                        pal.accent,
-                    );
-                }
             });
+
+        // ── 左侧栏: 参数面板 ──
+        egui::SidePanel::left("controls")
+            .resizable(true)
+            .default_width(380.0)
+            .width_range(320.0..=500.0)
+            .frame(egui::Frame::none().fill(pal.bg).inner_margin(egui::Margin::same(sp::XL)))
+            .show(ctx, |ui| {
+                left_panel(self, ui);
+            });
+
+        // ── 中央: 进度 + 日志 ──
+        egui::CentralPanel::default()
+            .frame(egui::Frame::none().fill(pal.bg).inner_margin(egui::Margin::same(sp::XL)))
+            .show(ctx, |ui| {
+                right_panel(self, ui);
+            });
+
+        // ── 拖放遮罩 (覆盖整窗) ──
+        if hovered {
+            let rect = ctx.screen_rect();
+            let painter =
+                ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("drop_overlay")));
+            painter.rect_filled(rect, rd::PANEL, pal.drop_overlay);
+            painter.rect_stroke(rect, rd::PANEL, egui::Stroke::new(3.0, pal.accent));
+            let title_font = ctx
+                .style()
+                .text_styles
+                .get(&TextStyle::Name("Title".into()))
+                .cloned()
+                .unwrap_or_else(|| FontId::proportional(20.0));
+            painter.text(
+                rect.center(),
+                egui::Align2::CENTER_CENTER,
+                i18n::t("drag_drop_hint"),
+                title_font,
+                pal.accent,
+            );
+        }
 
         // ── 归档列表面板 (浮动窗口) ──
         if self.show_archive_panel {
@@ -1388,357 +1483,311 @@ impl eframe::App for App {
     }
 }
 
-fn title_bar(ui: &mut egui::Ui, app: &mut App) {
-    ui.horizontal(|ui| {
-        ui.label(
-            RichText::new(i18n::t("app_name"))
-                .color(ACCENT)
-                .font(FontId::proportional(24.0))
-                .strong(),
-        );
-        ui.label(
-            RichText::new(i18n::t("app_tagline"))
-                .color(TEXT_DIM)
-                .font(FontId::proportional(13.0)),
-        );
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            // 主题切换按钮
-            if ui.add_sized(
-                Vec2::new(40.0, 26.0),
-                egui::Button::new(
-                    RichText::new(app.theme.icon())
-                        .font(FontId::proportional(14.0)),
-                )
-                .rounding(rd::BUTTON),
-            ).clicked() {
-                app.theme = app.theme.toggle();
-            }
-            ui.add_space(4.0);
-            // 语言切换按钮
-            let lang = i18n::current_lang();
-            let btn_label = match lang {
-                Lang::Zh => "🌐 EN",
-                Lang::En => "🌐 中文",
-            };
-            if ui.add_sized(
-                Vec2::new(72.0, 26.0),
-                egui::Button::new(
-                    RichText::new(btn_label)
-                        .font(FontId::proportional(12.0)),
-                )
-                .rounding(rd::BUTTON),
-            ).clicked() {
-                let new_lang = lang.toggle();
-                i18n::set_lang(new_lang);
-                app.status_text = i18n::t("ready").to_string();
-            }
-            ui.add_space(8.0);
-            ui.label(
-                RichText::new(i18n::t("app_version"))
-                    .color(TEXT_DIM)
-                    .font(FontId::proportional(11.0)),
-            );
-        });
-    });
-}
-
-fn mode_tabs(app: &mut App, ui: &mut egui::Ui) {
-    ui.horizontal(|ui| {
-        let modes = [Mode::Compress, Mode::Decompress, Mode::Encrypt, Mode::Decrypt];
-        for m in modes {
-            let selected = app.mode == m;
-            let txt = RichText::new(m.title()).font(FontId::proportional(14.0)).strong();
-            let btn = egui::SelectableLabel::new(selected, txt);
-            let resp = ui.add_sized(Vec2::new(130.0, 30.0), btn);
-            if resp.clicked() && !app.working {
-                app.switch_mode(m);
-            }
-            if selected {
-                resp.highlight();
-            }
-            ui.add_space(4.0);
-        }
-    });
+/// 卡片容器: 用 Frame::group 实现分组, 提供视觉层次
+fn card(ui: &mut egui::Ui, pal: &Palette, content: impl FnOnce(&mut egui::Ui)) {
+    egui::Frame::group(ui.style())
+        .fill(pal.panel)
+        .rounding(rd::PANEL)
+        .inner_margin(egui::Margin::same(sp::XL))
+        .show(ui, content);
 }
 
 fn left_panel(app: &mut App, ui: &mut egui::Ui) {
-    egui::Frame::group(ui.style())
-        .fill(PANEL)
-        .rounding(10.0)
-        .inner_margin(egui::Margin::same(16.0))
-        .show(ui, |ui| {
-            ui.set_min_width(ui.available_width());
+    let pal = app.pal.clone();
 
-            section_label(ui, i18n::t("input"));
-            ui.horizontal(|ui| {
-                let _ = ui.add_sized(
-                    Vec2::new(ui.available_width() - 150.0, 28.0),
-                    egui::TextEdit::singleline(&mut app.input_path)
-                        .hint_text(i18n::t("input_hint")),
-                );
-                if app.mode == Mode::Compress {
-                    if ui.add_sized(Vec2::new(68.0, 28.0), egui::Button::new(i18n::t("pick_file")).rounding(rd::BUTTON)).clicked() {
-                        app.pick_input_file();
-                    }
-                    if ui.add_sized(Vec2::new(68.0, 28.0), egui::Button::new(i18n::t("pick_dir")).rounding(rd::BUTTON)).clicked() {
-                        app.pick_input_dir();
-                    }
-                } else {
-                    if ui.add_sized(Vec2::new(140.0, 28.0), egui::Button::new(i18n::t("pick_file_btn")).rounding(rd::BUTTON)).clicked() {
-                        app.pick_input_file();
-                    }
-                }
-            });
-
-            ui.add_space(10.0);
-
-            section_label(ui, i18n::t("output"));
-            ui.horizontal(|ui| {
-                let _ = ui.add_sized(
-                    Vec2::new(ui.available_width() - 80.0, 28.0),
-                    egui::TextEdit::singleline(&mut app.output_path)
-                        .hint_text(i18n::t("output_hint")),
-                );
-                if ui.add_sized(Vec2::new(72.0, 28.0), egui::Button::new(i18n::t("browse")).rounding(rd::BUTTON)).clicked() {
-                    match app.mode {
-                        Mode::Compress | Mode::Encrypt => app.pick_output_file(),
-                        Mode::Decompress | Mode::Decrypt => app.pick_output_dir(),
-                    }
-                }
-            });
-
-            // ── 解压快捷按钮 ──
-            if app.mode == Mode::Decompress {
-                ui.add_space(8.0);
-                ui.horizontal(|ui| {
-                    let here_btn = egui::Button::new(
-                        RichText::new(i18n::t("extract_here"))
-                            .color(app.pal.btn_text)
-                            .font(FontId::proportional(12.0))
-                            .strong(),
-                    )
-                    .rounding(rd::BUTTON)
-                    .fill(ACCENT_DIM)
-                    .min_size(Vec2::new((ui.available_width() - 8.0) / 2.0, 30.0));
-                    if ui.add(here_btn).clicked() && !app.working {
-                        app.extract_here();
-                    }
-                    let to_btn = egui::Button::new(
-                        RichText::new(i18n::t("extract_to"))
-                            .color(app.pal.btn_text)
-                            .font(FontId::proportional(12.0))
-                            .strong(),
-                    )
-                    .rounding(rd::BUTTON)
-                    .fill(ACCENT_DIM)
-                    .min_size(Vec2::new(ui.available_width(), 30.0));
-                    if ui.add(to_btn).clicked() && !app.working {
-                        app.extract_as();
-                    }
-                });
-
-                // 浏览 + 测试 按钮
-                ui.add_space(4.0);
-                ui.horizontal(|ui| {
-                    let list_btn = egui::Button::new(
-                        RichText::new(i18n::t("list_archive"))
-                            .font(FontId::proportional(12.0)),
-                    )
-                    .rounding(rd::BUTTON)
-                    .min_size(Vec2::new((ui.available_width() - 8.0) / 2.0, 28.0));
-                    if ui.add(list_btn).clicked() && !app.working {
-                        app.list_archive_gui();
-                    }
-                    let test_btn = egui::Button::new(
-                        RichText::new(i18n::t("test_archive"))
-                            .font(FontId::proportional(12.0)),
-                    )
-                    .rounding(rd::BUTTON)
-                    .min_size(Vec2::new(ui.available_width(), 28.0));
-                    if ui.add(test_btn).clicked() && !app.working {
-                        app.test_archive_gui();
-                    }
-                });
-            }
-
-            ui.add_space(10.0);
-
+    // ── 卡片: 输入 ──
+    card(ui, &pal, |ui| {
+        section_label(ui, i18n::t("input"), &pal);
+        ui.add_space(sp::SM);
+        ui.horizontal(|ui| {
+            let _ = ui.add_sized(
+                Vec2::new(ui.available_width() - 150.0, 30.0),
+                egui::TextEdit::singleline(&mut app.input_path)
+                    .hint_text(i18n::t("input_hint")),
+            );
             if app.mode == Mode::Compress {
-                section_label(ui, i18n::t("format"));
-                let containers = Container::all();
-                let mut selected = app.selected_container_idx;
-                egui::ComboBox::from_id_salt("fmt_combo")
-                    .selected_text(containers[selected].display_name())
-                    .width(ui.available_width())
-                    .show_ui(ui, |ui| {
-                        for (i, c) in containers.iter().enumerate() {
-                            ui.selectable_value(&mut selected, i, c.display_name());
-                        }
-                    });
-                app.selected_container_idx = selected;
+                if ui.add_sized(Vec2::new(68.0, bh::NORMAL), egui::Button::new(i18n::t("pick_file")).rounding(rd::BUTTON)).clicked() {
+                    app.pick_input_file();
+                }
+                if ui.add_sized(Vec2::new(68.0, bh::NORMAL), egui::Button::new(i18n::t("pick_dir")).rounding(rd::BUTTON)).clicked() {
+                    app.pick_input_dir();
+                }
+            } else {
+                if ui.add_sized(Vec2::new(140.0, bh::NORMAL), egui::Button::new(i18n::t("pick_file_btn")).rounding(rd::BUTTON)).clicked() {
+                    app.pick_input_file();
+                }
+            }
+        });
+    });
 
-                ui.add_space(10.0);
+    ui.add_space(sp::MD);
 
-                section_label(ui, &format!("{}: {}", i18n::t("compress_level"), app.level));
-                let level_range = match app.current_container() {
-                    Container::Zip => 0..=9,
-                    Container::SevenZ => 1..=9,
-                    Container::TarLz4 => 1..=12,
-                    _ => 1..=9,
-                };
-                let _ = ui.add_sized(
-                    Vec2::new(ui.available_width(), 20.0),
-                    egui::Slider::new(&mut app.level, level_range).clamping(egui::SliderClamping::Always),
-                );
-                level_hint(ui, app.level, app.current_container());
+    // ── 卡片: 输出 ──
+    card(ui, &pal, |ui| {
+        section_label(ui, i18n::t("output"), &pal);
+        ui.add_space(sp::SM);
+        ui.horizontal(|ui| {
+            let _ = ui.add_sized(
+                Vec2::new(ui.available_width() - 80.0, 30.0),
+                egui::TextEdit::singleline(&mut app.output_path)
+                    .hint_text(i18n::t("output_hint")),
+            );
+            if ui.add_sized(Vec2::new(72.0, bh::NORMAL), egui::Button::new(i18n::t("browse")).rounding(rd::BUTTON)).clicked() {
+                match app.mode {
+                    Mode::Compress | Mode::Encrypt => app.pick_output_file(),
+                    Mode::Decompress | Mode::Decrypt => app.pick_output_dir(),
+                }
+            }
+        });
+    });
 
-                ui.add_space(10.0);
+    // ── 卡片: 解压快捷按钮 (仅解压模式) ──
+    if app.mode == Mode::Decompress {
+        ui.add_space(sp::MD);
+        card(ui, &pal, |ui| {
+            ui.horizontal(|ui| {
+                let here_btn = egui::Button::new(
+                    RichText::new(i18n::t("extract_here"))
+                        .color(pal.btn_text)
+                        .text_style(TextStyle::Name("Button".into()))
+                        .strong(),
+                )
+                .rounding(rd::BUTTON)
+                .fill(pal.accent_dim)
+                .min_size(Vec2::new((ui.available_width() - sp::SM) / 2.0, bh::NORMAL));
+                if ui.add(here_btn).clicked() && !app.working {
+                    app.extract_here();
+                }
+                let to_btn = egui::Button::new(
+                    RichText::new(i18n::t("extract_to"))
+                        .color(pal.btn_text)
+                        .text_style(TextStyle::Name("Button".into()))
+                        .strong(),
+                )
+                .rounding(rd::BUTTON)
+                .fill(pal.accent_dim)
+                .min_size(Vec2::new(ui.available_width(), bh::NORMAL));
+                if ui.add(to_btn).clicked() && !app.working {
+                    app.extract_as();
+                }
+            });
 
+            ui.add_space(sp::XS);
+
+            ui.horizontal(|ui| {
+                let list_btn = egui::Button::new(
+                    RichText::new(i18n::t("list_archive")).text_style(TextStyle::Name("Button".into())),
+                )
+                .rounding(rd::BUTTON)
+                .min_size(Vec2::new((ui.available_width() - sp::SM) / 2.0, bh::NORMAL));
+                if ui.add(list_btn).clicked() && !app.working {
+                    app.list_archive_gui();
+                }
+                let test_btn = egui::Button::new(
+                    RichText::new(i18n::t("test_archive")).text_style(TextStyle::Name("Button".into())),
+                )
+                .rounding(rd::BUTTON)
+                .min_size(Vec2::new(ui.available_width(), bh::NORMAL));
+                if ui.add(test_btn).clicked() && !app.working {
+                    app.test_archive_gui();
+                }
+            });
+        });
+    }
+
+    // ── 卡片: 格式 + 级别 (仅压缩) ──
+    if app.mode == Mode::Compress {
+        ui.add_space(sp::MD);
+        card(ui, &pal, |ui| {
+            section_label(ui, i18n::t("format"), &pal);
+            ui.add_space(sp::SM);
+            let containers = Container::all();
+            let mut selected = app.selected_container_idx;
+            egui::ComboBox::from_id_salt("fmt_combo")
+                .selected_text(containers[selected].display_name())
+                .width(ui.available_width())
+                .show_ui(ui, |ui| {
+                    for (i, c) in containers.iter().enumerate() {
+                        ui.selectable_value(&mut selected, i, c.display_name());
+                    }
+                });
+            app.selected_container_idx = selected;
+
+            ui.add_space(sp::MD);
+
+            section_label(ui, &format!("{}: {}", i18n::t("compress_level"), app.level), &pal);
+            ui.add_space(sp::XS);
+            let level_range = match app.current_container() {
+                Container::Zip => 0..=9,
+                Container::SevenZ => 1..=9,
+                Container::TarLz4 => 1..=12,
+                _ => 1..=9,
+            };
+            let _ = ui.add_sized(
+                Vec2::new(ui.available_width(), 20.0),
+                egui::Slider::new(&mut app.level, level_range).clamping(egui::SliderClamping::Always),
+            );
+            level_hint(ui, app.level, app.current_container(), &pal);
+        });
+    }
+
+    // ── 卡片: 选项 (加密归档 / 安全删除 / 排除 / 分卷) ──
+    if matches!(app.mode, Mode::Compress | Mode::Encrypt) {
+        ui.add_space(sp::MD);
+        card(ui, &pal, |ui| {
+            if app.mode == Mode::Compress {
                 ui.horizontal(|ui| {
                     let _ = ui.checkbox(&mut app.encrypt_archive, i18n::t("encrypt_after"));
                     if app.encrypt_archive {
-                        ui.label(RichText::new("🔒").color(WARN));
+                        ui.label(RichText::new("🔒").color(pal.warn));
                         // 若容器不支持内嵌加密, 提示将使用 .enc 包装
                         if !app.current_container().supports_encryption() {
                             ui.label(
                                 RichText::new("(.enc)")
-                                    .color(TEXT_DIM)
-                                    .font(FontId::proportional(10.0)),
+                                    .color(pal.text_dim)
+                                    .text_style(TextStyle::Name("Small".into())),
                             );
                         }
                     }
                 });
+                ui.add_space(sp::SM);
             }
 
             // 安全删除源文件选项 (压缩/加密模式)
-            if matches!(app.mode, Mode::Compress | Mode::Encrypt) {
-                ui.add_space(4.0);
-                ui.horizontal(|ui| {
-                    let _ = ui.checkbox(&mut app.secure_delete, i18n::t("secure_delete"));
-                    if app.secure_delete {
-                        ui.label(RichText::new("🗑️").color(WARN));
-                    }
-                });
-            }
-
-            let need_password = matches!(app.mode, Mode::Encrypt | Mode::Decrypt)
-                || (app.mode == Mode::Compress && app.encrypt_archive)
-                || (app.mode == Mode::Decompress
-                    && (std::path::Path::new(&app.input_path)
-                        .file_name()
-                        .map(|s| s.to_string_lossy().to_lowercase().ends_with(".enc"))
-                        .unwrap_or(false)
-                        || is_likely_encrypted_archive(&app.input_path)));
-
-            if need_password {
-                ui.add_space(8.0);
-                section_label(ui, i18n::t("password"));
-                ui.horizontal(|ui| {
-                    let _ = ui.add_sized(
-                        Vec2::new(ui.available_width() - 90.0, 28.0),
-                        egui::TextEdit::singleline(&mut app.password)
-                            .password(!app.show_password)
-                            .hint_text(i18n::t("password_hint")),
-                    );
-                    // 密码可见性切换按钮
-                    let eye = if app.show_password { "🙈" } else { "👁" };
-                    if ui.add_sized(Vec2::new(36.0, 28.0), egui::Button::new(eye).rounding(rd::BUTTON)).clicked() {
-                        app.show_password = !app.show_password;
-                    }
-                    // 密码生成器按钮
-                    if ui.add_sized(Vec2::new(36.0, 28.0), egui::Button::new("🎲").rounding(rd::BUTTON)).clicked() {
-                        app.generate_password();
-                    }
-                });
-            }
-
-            // 最近文件 (下拉选择)
-            if !app.recent_files.is_empty() && !app.working {
-                ui.add_space(8.0);
-                section_label(ui, i18n::t("recent_files"));
-                egui::ComboBox::from_id_salt("recent_combo")
-                    .selected_text("")
-                    .width(ui.available_width())
-                    .show_ui(ui, |ui| {
-                        for path in &app.recent_files.clone() {
-                            let label = std::path::Path::new(path)
-                                .file_name()
-                                .map(|s| s.to_string_lossy().to_string())
-                                .unwrap_or_else(|| path.clone());
-                            if ui.selectable_label(false, &label).clicked() {
-                                app.input_path = path.clone();
-                                app.output_path.clear();
-                                app.auto_fill_output();
-                                app.maybe_switch_mode_by_input();
-                            }
-                            ui.label(
-                                RichText::new(path)
-                                    .color(TEXT_DIM)
-                                    .font(FontId::monospace(10.0)),
-                            );
-                        }
-                    });
-            }
+            ui.horizontal(|ui| {
+                let _ = ui.checkbox(&mut app.secure_delete, i18n::t("secure_delete"));
+                if app.secure_delete {
+                    ui.label(RichText::new("🗑️").color(pal.warn));
+                }
+            });
 
             // 压缩模式: 排除规则 + 分卷大小
             if app.mode == Mode::Compress {
-                ui.add_space(8.0);
-                section_label(ui, i18n::t("exclude_label"));
+                ui.add_space(sp::SM);
+                section_label(ui, i18n::t("exclude_label"), &pal);
+                ui.add_space(sp::XS);
                 let _ = ui.add_sized(
-                    Vec2::new(ui.available_width(), 28.0),
+                    Vec2::new(ui.available_width(), 30.0),
                     egui::TextEdit::singleline(&mut app.exclude_patterns)
                         .hint_text(i18n::t("exclude_hint")),
                 );
 
-                ui.add_space(8.0);
-                section_label(ui, i18n::t("split_label"));
+                ui.add_space(sp::SM);
+                section_label(ui, i18n::t("split_label"), &pal);
+                ui.add_space(sp::XS);
                 let _ = ui.add_sized(
-                    Vec2::new(ui.available_width(), 28.0),
+                    Vec2::new(ui.available_width(), 30.0),
                     egui::TextEdit::singleline(&mut app.split_size)
                         .hint_text(i18n::t("split_hint")),
                 );
             }
+        });
+    }
 
-            ui.add_space(16.0);
+    // ── 卡片: 密码 (按需) ──
+    let need_password = matches!(app.mode, Mode::Encrypt | Mode::Decrypt)
+        || (app.mode == Mode::Compress && app.encrypt_archive)
+        || (app.mode == Mode::Decompress
+            && (std::path::Path::new(&app.input_path)
+                .file_name()
+                .map(|s| s.to_string_lossy().to_lowercase().ends_with(".enc"))
+                .unwrap_or(false)
+                || is_likely_encrypted_archive(&app.input_path)));
 
-            // 主按钮 + 取消按钮
+    if need_password {
+        ui.add_space(sp::MD);
+        card(ui, &pal, |ui| {
+            section_label(ui, i18n::t("password"), &pal);
+            ui.add_space(sp::SM);
             ui.horizontal(|ui| {
-                let btn_text = if app.working {
-                    app.status_text.clone()
-                } else {
-                    format!("▶ {}", app.mode.title())
-                };
-                let btn_color = if app.working { ACCENT_DIM } else { ACCENT };
-                let btn = egui::Button::new(
-                    RichText::new(btn_text)
-                        .color(app.pal.btn_text)
-                        .font(FontId::proportional(15.0))
-                        .strong(),
-                )
-                .rounding(rd::BUTTON)
-                .fill(btn_color)
-                .min_size(Vec2::new(ui.available_width() - 80.0, 40.0));
-                let resp = ui.add(btn);
-                if resp.clicked() && !app.working {
-                    app.start_work();
+                let _ = ui.add_sized(
+                    Vec2::new(ui.available_width() - 90.0, 30.0),
+                    egui::TextEdit::singleline(&mut app.password)
+                        .password(!app.show_password)
+                        .hint_text(i18n::t("password_hint")),
+                );
+                // 密码可见性切换按钮
+                let eye = if app.show_password { "🙈" } else { "👁" };
+                if ui.add_sized(Vec2::new(36.0, bh::NORMAL), egui::Button::new(eye).rounding(rd::BUTTON)).clicked() {
+                    app.show_password = !app.show_password;
                 }
-
-                // 取消按钮
-                if app.working {
-                    let cancel_btn = egui::Button::new(
-                        RichText::new("✕")
-                            .color(app.pal.btn_text)
-                            .font(FontId::proportional(15.0)),
-                    )
-                    .rounding(rd::BUTTON)
-                    .fill(ERROR)
-                    .min_size(Vec2::new(40.0, 40.0));
-                    if ui.add(cancel_btn).clicked() {
-                        app.cancel_work();
-                    }
+                // 密码生成器按钮
+                if ui.add_sized(Vec2::new(36.0, bh::NORMAL), egui::Button::new("🎲").rounding(rd::BUTTON)).clicked() {
+                    app.generate_password();
                 }
             });
         });
+    }
+
+    // ── 卡片: 最近文件 ──
+    if !app.recent_files.is_empty() && !app.working {
+        ui.add_space(sp::MD);
+        card(ui, &pal, |ui| {
+            section_label(ui, i18n::t("recent_files"), &pal);
+            ui.add_space(sp::SM);
+            egui::ComboBox::from_id_salt("recent_combo")
+                .selected_text("")
+                .width(ui.available_width())
+                .show_ui(ui, |ui| {
+                    for path in &app.recent_files.clone() {
+                        let label = std::path::Path::new(path)
+                            .file_name()
+                            .map(|s| s.to_string_lossy().to_string())
+                            .unwrap_or_else(|| path.clone());
+                        if ui.selectable_label(false, &label).clicked() {
+                            app.input_path = path.clone();
+                            app.output_path.clear();
+                            app.auto_fill_output();
+                            app.maybe_switch_mode_by_input();
+                        }
+                        ui.label(
+                            RichText::new(path)
+                                .color(pal.text_dim)
+                                .text_style(TextStyle::Monospace),
+                        );
+                    }
+                });
+        });
+    }
+
+    // ── 主按钮 + 取消按钮 ──
+    ui.add_space(sp::LG);
+    ui.horizontal(|ui| {
+        let btn_text = if app.working {
+            app.status_text.clone()
+        } else {
+            format!("▶ {}", app.mode.title())
+        };
+        let btn_color = if app.working { pal.accent_dim } else { pal.accent };
+        let btn = egui::Button::new(
+            RichText::new(btn_text)
+                .color(pal.btn_text)
+                .text_style(TextStyle::Name("Button".into()))
+                .strong(),
+        )
+        .rounding(rd::BUTTON)
+        .fill(btn_color)
+        .min_size(Vec2::new(ui.available_width() - 50.0, bh::MAIN));
+        let resp = ui.add(btn);
+        if resp.clicked() && !app.working {
+            app.start_work();
+        }
+
+        // 取消按钮
+        if app.working {
+            let cancel_btn = egui::Button::new(
+                RichText::new("✕")
+                    .color(pal.btn_text)
+                    .text_style(TextStyle::Name("Button".into())),
+            )
+            .rounding(rd::BUTTON)
+            .fill(pal.error)
+            .min_size(Vec2::new(40.0, bh::MAIN));
+            if ui.add(cancel_btn).clicked() {
+                app.cancel_work();
+            }
+        }
+    });
 }
 
 /// 简单判断: 输入若是 zip/7z/rar 归档, 可能是加密的 — 显示密码框
@@ -1750,143 +1799,146 @@ fn is_likely_encrypted_archive(path: &str) -> bool {
     name.ends_with(".zip") || name.ends_with(".7z") || name.ends_with(".rar")
 }
 
-fn level_hint(ui: &mut egui::Ui, level: i32, container: Container) {
+fn level_hint(ui: &mut egui::Ui, level: i32, container: Container, pal: &Palette) {
     let (text, color) = match container {
         Container::TarLz4 => (
             if level <= 3 { "⚡ 极速 (LZ4 ~3GB/s)" } else { "LZ4 高压缩" },
-            if level <= 3 { SUCCESS } else { WARN },
+            if level <= 3 { pal.success } else { pal.warn },
         ),
         Container::TarZst => (
             if level <= 2 { "⚡ 极速 Zstandard" } else if level <= 5 { "均衡" } else { "高压缩" },
-            if level <= 5 { SUCCESS } else { WARN },
+            if level <= 5 { pal.success } else { pal.warn },
         ),
-        Container::TarXz => ("LZMA 高压缩 (较慢)", WARN),
+        Container::TarXz => ("LZMA 高压缩 (较慢)", pal.warn),
         Container::SevenZ => (
             if level <= 3 { "LZMA2 快速" } else { "LZMA2 高压缩 (较慢)" },
-            if level <= 3 { SUCCESS } else { WARN },
+            if level <= 3 { pal.success } else { pal.warn },
         ),
         Container::Zip => (
             if level <= 3 { "⚡ Zstd 快速" } else if level <= 6 { "均衡" } else { "高压缩" },
-            if level <= 6 { SUCCESS } else { WARN },
+            if level <= 6 { pal.success } else { pal.warn },
         ),
         _ => (
             if level <= 3 { "快速" } else if level <= 6 { "均衡" } else { "高压缩" },
-            if level <= 6 { SUCCESS } else { WARN },
+            if level <= 6 { pal.success } else { pal.warn },
         ),
     };
     let _ = level;
-    ui.label(RichText::new(text).color(color).font(FontId::proportional(11.0)));
+    ui.label(
+        RichText::new(text)
+            .color(color)
+            .text_style(TextStyle::Name("Small".into())),
+    );
 }
 
 fn right_panel(app: &mut App, ui: &mut egui::Ui) {
+    let pal = app.pal.clone();
     ui.vertical(|ui| {
-        egui::Frame::group(ui.style())
-            .fill(PANEL)
-            .rounding(10.0)
-            .inner_margin(egui::Margin::same(16.0))
-            .show(ui, |ui| {
-                ui.set_min_width(ui.available_width());
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new(i18n::t("progress")).color(TEXT_DIM).font(FontId::proportional(13.0)));
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let pct = (app.progress * 100.0) as u32;
-                        let done_label = i18n::t("done");
-                        let status_color = if app.working {
-                            ACCENT
-                        } else if app.status_text == done_label {
-                            SUCCESS
-                        } else {
-                            TEXT_DIM
-                        };
-                        ui.label(
-                            RichText::new(format!("{} · {}%", app.status_text, pct))
-                                .color(status_color)
-                                .font(FontId::proportional(13.0)),
-                        );
-                    });
-                });
-                ui.add_space(6.0);
-                let bar_color = if app.progress >= 1.0 { app.pal.success } else { app.pal.accent };
-                let bar = egui::ProgressBar::new(app.progress)
-                    .fill(bar_color)
-                    .rounding(rd::BUTTON)
-                    .desired_width(ui.available_width())
-                    .desired_height(22.0);
-                ui.add(bar);
-
-                // 进度详情: 字节数 + 速度 + ETA
-                let (done, total) = app.progress_detail;
-                if total > 0 && app.working {
-                    ui.add_space(4.0);
+        // ── 卡片: 进度 ──
+        card(ui, &pal, |ui| {
+            ui.set_min_width(ui.available_width());
+            ui.horizontal(|ui| {
+                ui.label(
+                    RichText::new(i18n::t("progress"))
+                        .color(pal.text_dim)
+                        .text_style(TextStyle::Body),
+                );
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let pct = (app.progress * 100.0) as u32;
+                    let done_label = i18n::t("done");
+                    let status_color = if app.working {
+                        pal.accent
+                    } else if app.status_text == done_label {
+                        pal.success
+                    } else {
+                        pal.text_dim
+                    };
                     ui.label(
-                        RichText::new(format!(
-                            "{} / {}",
-                            format_size(done),
-                            format_size(total)
-                        ))
-                        .color(TEXT_DIM)
-                        .font(FontId::monospace(11.0)),
+                        RichText::new(format!("{} · {}%", app.status_text, pct))
+                            .color(status_color)
+                            .text_style(TextStyle::Body),
                     );
-                }
-            });
-
-        ui.add_space(12.0);
-
-        egui::Frame::group(ui.style())
-            .fill(PANEL)
-            .rounding(10.0)
-            .inner_margin(egui::Margin::same(16.0))
-            .show(ui, |ui| {
-                ui.set_min_width(ui.available_width());
-                ui.set_min_height(280.0);
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new(i18n::t("log")).color(TEXT_DIM).font(FontId::proportional(13.0)));
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button(i18n::t("clear")).clicked() {
-                            app.logs.clear();
-                        }
-                    });
                 });
-                ui.add_space(6.0);
-                egui::ScrollArea::vertical()
-                    .auto_shrink([false, false])
-                    .stick_to_bottom(true)
-                    .show(ui, |ui| {
-                        for entry in &app.logs {
-                            let color = match entry.kind {
-                                MsgKind::Info => TEXT,
-                                MsgKind::Success => SUCCESS,
-                                MsgKind::Warn => WARN,
-                                MsgKind::Error => ERROR,
-                            };
-                            // 时间戳 + 日志文本在同一行, 长文本自动换行
-                            // 使用 horizontal_wrapped 确保超长行不会溢出边界
-                            ui.horizontal_wrapped(|ui| {
-                                ui.spacing_mut().item_spacing.x = 6.0;
-                                ui.label(
-                                    RichText::new(&entry.time)
-                                        .color(TEXT_DIM)
-                                        .font(FontId::monospace(11.0)),
-                                );
-                                // 日志文本占满剩余宽度, 自动换行
-                                ui.label(
-                                    RichText::new(&entry.text)
-                                        .color(color)
-                                        .font(FontId::monospace(12.0)),
-                                );
-                            });
-                            ui.add_space(2.0);
-                        }
-                    });
             });
+            ui.add_space(sp::SM);
+            let bar_color = if app.progress >= 1.0 { pal.success } else { pal.accent };
+            let bar = egui::ProgressBar::new(app.progress)
+                .fill(bar_color)
+                .rounding(rd::BUTTON)
+                .desired_width(ui.available_width())
+                .desired_height(22.0);
+            ui.add(bar);
+
+            // 进度详情: 字节数 + 速度 + ETA
+            let (done, total) = app.progress_detail;
+            if total > 0 && app.working {
+                ui.add_space(sp::XS);
+                ui.label(
+                    RichText::new(format!("{} / {}", format_size(done), format_size(total)))
+                        .color(pal.text_dim)
+                        .text_style(TextStyle::Monospace),
+                );
+            }
+        });
+
+        ui.add_space(sp::MD);
+
+        // ── 卡片: 日志 ──
+        card(ui, &pal, |ui| {
+            ui.set_min_width(ui.available_width());
+            ui.set_min_height(280.0);
+            ui.horizontal(|ui| {
+                ui.label(
+                    RichText::new(i18n::t("log"))
+                        .color(pal.text_dim)
+                        .text_style(TextStyle::Body),
+                );
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.button(i18n::t("clear")).clicked() {
+                        app.logs.clear();
+                    }
+                });
+            });
+            ui.add_space(sp::SM);
+            egui::ScrollArea::vertical()
+                .auto_shrink([false, false])
+                .stick_to_bottom(true)
+                .show(ui, |ui| {
+                    for entry in &app.logs {
+                        let color = match entry.kind {
+                            MsgKind::Info => pal.text,
+                            MsgKind::Success => pal.success,
+                            MsgKind::Warn => pal.warn,
+                            MsgKind::Error => pal.error,
+                        };
+                        // 时间戳 + 日志文本在同一行, 长文本自动换行
+                        // 使用 horizontal_wrapped 确保超长行不会溢出边界
+                        ui.horizontal_wrapped(|ui| {
+                            ui.spacing_mut().item_spacing.x = sp::SM;
+                            ui.label(
+                                RichText::new(&entry.time)
+                                    .color(pal.text_dim)
+                                    .text_style(TextStyle::Monospace),
+                            );
+                            // 日志文本占满剩余宽度, 自动换行
+                            ui.label(
+                                RichText::new(&entry.text)
+                                    .color(color)
+                                    .text_style(TextStyle::Name("MonoBody".into())),
+                            );
+                        });
+                        ui.add_space(sp::XS);
+                    }
+                });
+        });
     });
 }
 
-fn section_label(ui: &mut egui::Ui, text: &str) {
+fn section_label(ui: &mut egui::Ui, text: &str, pal: &Palette) {
     ui.label(
         RichText::new(text)
-            .color(TEXT_DIM)
-            .font(FontId::proportional(12.0))
+            .color(pal.text_dim)
+            .text_style(TextStyle::Name("Small".into()))
             .strong(),
     );
 }
@@ -1908,6 +1960,7 @@ mod chrono_like {
 
 /// 归档列表面板 (浮动窗口)
 fn archive_list_window(app: &mut App, ctx: &egui::Context) {
+    let pal = app.pal.clone();
     let mut open = true;
     egui::Window::new(format!("📋 {}", i18n::t("list_archive")))
         .open(&mut open)
@@ -1921,8 +1974,8 @@ fn archive_list_window(app: &mut App, ctx: &egui::Context) {
             if app.archive_entries.is_empty() {
                 ui.label(
                     RichText::new("(空)")
-                        .color(TEXT_DIM)
-                        .font(FontId::proportional(14.0)),
+                        .color(pal.text_dim)
+                        .text_style(TextStyle::Body),
                 );
                 return;
             }
@@ -1944,8 +1997,8 @@ fn archive_list_window(app: &mut App, ctx: &egui::Context) {
                         i18n::t("dirs"),
                         dir_count
                     ))
-                    .color(TEXT_DIM)
-                    .font(FontId::proportional(12.0)),
+                    .color(pal.text_dim)
+                    .text_style(TextStyle::Name("Button".into())),
                 );
             });
             ui.horizontal(|ui| {
@@ -1957,28 +2010,38 @@ fn archive_list_window(app: &mut App, ctx: &egui::Context) {
                         i18n::t("compressed"),
                         format_size(total_compressed)
                     ))
-                    .color(TEXT_DIM)
-                    .font(FontId::monospace(11.0)),
+                    .color(pal.text_dim)
+                    .text_style(TextStyle::Monospace),
                 );
                 if total_size > 0 {
                     let ratio = (1.0 - total_compressed as f64 / total_size as f64) * 100.0;
                     ui.label(
                         RichText::new(format!("({:.1}% {})", ratio, i18n::t("saved")))
-                            .color(SUCCESS)
-                            .font(FontId::monospace(11.0)),
+                            .color(pal.success)
+                            .text_style(TextStyle::Monospace),
                     );
                 }
             });
 
-            ui.add_space(8.0);
+            ui.add_space(sp::MD);
             ui.separator();
-            ui.add_space(4.0);
+            ui.add_space(sp::XS);
 
             // 表头
             ui.horizontal(|ui| {
-                ui.label(RichText::new(i18n::t("name")).color(TEXT_DIM).font(FontId::proportional(12.0)).strong());
+                ui.label(
+                    RichText::new(i18n::t("name"))
+                        .color(pal.text_dim)
+                        .text_style(TextStyle::Name("Button".into()))
+                        .strong(),
+                );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(RichText::new(i18n::t("size")).color(TEXT_DIM).font(FontId::proportional(12.0)).strong());
+                    ui.label(
+                        RichText::new(i18n::t("size"))
+                            .color(pal.text_dim)
+                            .text_style(TextStyle::Name("Button".into()))
+                            .strong(),
+                    );
                 });
             });
             ui.separator();
@@ -1990,17 +2053,17 @@ fn archive_list_window(app: &mut App, ctx: &egui::Context) {
                     for entry in &app.archive_entries {
                         ui.horizontal(|ui| {
                             let icon = if entry.is_dir { "📁" } else { "📄" };
-                            let color = if entry.is_dir { TEXT_DIM } else { TEXT };
+                            let color = if entry.is_dir { pal.text_dim } else { pal.text };
                             ui.label(
                                 RichText::new(format!("{} {}", icon, entry.name))
                                     .color(color)
-                                    .font(FontId::monospace(11.0)),
+                                    .text_style(TextStyle::Monospace),
                             );
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                 ui.label(
                                     RichText::new(format_size(entry.size))
-                                        .color(TEXT_DIM)
-                                        .font(FontId::monospace(11.0)),
+                                        .color(pal.text_dim)
+                                        .text_style(TextStyle::Monospace),
                                 );
                             });
                         });
@@ -2065,7 +2128,11 @@ fn show_toast_overlay(app: &mut App, ctx: &egui::Context) {
                 .inner_margin(egui::Margin::same(sp::LG))
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
-                        ui.label(RichText::new(msg).color(color).font(FontId::proportional(13.0)));
+                        ui.label(
+                            RichText::new(msg)
+                                .color(color)
+                                .text_style(TextStyle::Body),
+                        );
                     });
                 });
         });
