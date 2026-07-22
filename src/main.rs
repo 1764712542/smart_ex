@@ -6,6 +6,7 @@ use i18n::Lang;
 use progress::Progress;
 use std::path::PathBuf;
 
+mod archive_list;
 mod cli;
 mod compress;
 mod crypto;
@@ -36,7 +37,9 @@ fn main() -> Result<()> {
             format,
             level,
             password,
-        } => run_compress(input, output, format, level, password),
+            exclude,
+            split,
+        } => run_compress(input, output, format, level, password, exclude, split),
         Commands::Decompress {
             input,
             output,
@@ -60,6 +63,8 @@ fn main() -> Result<()> {
             password,
             format,
         } => run_smart(input, output, password, format),
+        Commands::List { input, password } => run_list(input, password),
+        Commands::Test { input, password } => run_test(input, password),
     }
 }
 
@@ -194,6 +199,8 @@ fn run_compress(
     format: Option<String>,
     level: i32,
     password: Option<String>,
+    exclude: Vec<String>,
+    split: Option<String>,
 ) -> Result<()> {
     let container = infer_container(&input, &format, &output);
     // 单文件流: 若用户未指定输出, 根据格式名生成扩展名
@@ -231,23 +238,48 @@ fn run_compress(
     } else {
         None
     };
-    compress::compress(&input, &out, container, level, archive_pwd, &bar)?;
+
+    // 有排除规则 → 使用 compress_with_exclude, 否则用普通 compress
+    if exclude.is_empty() {
+        compress::compress(&input, &out, container, level, archive_pwd, &bar)?;
+    } else {
+        println!("🚫 排除规则: {:?}", exclude);
+        compress::compress_with_exclude(&input, &out, container, level, archive_pwd, &bar, &exclude)?;
+    }
     bar.finish("✅ 压缩完成");
+
+    // 分卷切割 (仅对已生成的归档文件生效)
+    let final_path = out.clone();
+    if let Some(split_str) = &split {
+        let split_size = compress::parse_split_size(split_str)?;
+        println!("✂️ 分卷大小: {}", progress::format_bytes(split_size));
+        let parts = compress::split_file(&out, split_size)?;
+        if parts.len() > 1 {
+            println!("📁 分卷归档 ({} 个):", parts.len());
+            for (i, p) in parts.iter().enumerate() {
+                println!("  {}. {:<3} {}", i + 1, format!(".{:03}", i + 1), p.display());
+            }
+            // 分卷后原文件已被删除, 不再走加密包装流程
+            return Ok(());
+        } else {
+            println!("ℹ️ 文件小于分卷大小, 无需分卷");
+        }
+    }
 
     // 对不支持内嵌加密的容器 (tar 系列), 退回到 .enc 包装
     if let Some(pwd) = &password {
         if !container.supports_encryption() {
             println!("🔐 启用加密...");
-            let enc_out = PathBuf::from(format!("{}.enc", out.display()));
+            let enc_out = PathBuf::from(format!("{}.enc", final_path.display()));
             let bar = Progress::new("加密中");
-            crypto::encrypt_file(&out, &enc_out, pwd)?;
+            crypto::encrypt_file(&final_path, &enc_out, pwd)?;
             bar.finish("✅ 加密完成");
-            let _ = std::fs::remove_file(&out);
+            let _ = std::fs::remove_file(&final_path);
             println!("📁 加密归档: {}", enc_out.display());
             return Ok(());
         }
     }
-    println!("📁 归档: {}", out.display());
+    println!("📁 归档: {}", final_path.display());
     Ok(())
 }
 
@@ -506,6 +538,120 @@ fn run_smart(
         return Err(anyhow::anyhow!("输入路径不存在: {}", input.display()));
     }
     Ok(())
+}
+
+/// 列出归档内容 (不解压)
+fn run_list(input: PathBuf, password: Option<String>) -> Result<()> {
+    println!("📋 列出归档内容: {}", input.display());
+
+    // 若是 .enc 加密文件, 先解密到临时文件
+    let archive_path = if let Some(pwd) = &password {
+        if is_encrypted(&input)? {
+            println!("🔐 检测到 .enc 加密文件, 先解密...");
+            let tmp = PathBuf::from(format!("{}.tmp", input.display()));
+            let bar = Progress::new("解密中");
+            crypto::decrypt_file(&input, &tmp, pwd)?;
+            bar.finish("✅ 解密完成");
+            tmp
+        } else {
+            input.clone()
+        }
+    } else {
+        input.clone()
+    };
+
+    let entries = archive_list::list_archive(&archive_path, password.as_deref())?;
+
+    if archive_path != input {
+        let _ = std::fs::remove_file(&archive_path);
+    }
+
+    if entries.is_empty() {
+        println!("  (空归档或格式不支持列表)");
+        return Ok(());
+    }
+
+    // 表格式输出
+    println!(
+        "{:<50} {:>12} {:>12}  {}",
+        "名称", "大小", "压缩后", "类型"
+    );
+    println!("{}", "-".repeat(80));
+    let mut total_size = 0u64;
+    let mut total_compressed = 0u64;
+    for e in &entries {
+        let kind = if e.is_dir { "DIR " } else { "FILE" };
+        println!(
+            "{:<50} {:>12} {:>12}  {}",
+            truncate_str(&e.name, 50),
+            progress::format_bytes(e.size),
+            progress::format_bytes(e.compressed_size),
+            kind
+        );
+        total_size += e.size;
+        total_compressed += e.compressed_size;
+    }
+    println!("{}", "-".repeat(80));
+    println!(
+        "共 {} 个条目 · 总大小 {} · 压缩后 {}",
+        entries.len(),
+        progress::format_bytes(total_size),
+        progress::format_bytes(total_compressed)
+    );
+    Ok(())
+}
+
+/// 测试归档完整性
+fn run_test(input: PathBuf, password: Option<String>) -> Result<()> {
+    println!("🧪 测试归档完整性: {}", input.display());
+
+    let archive_path = if let Some(pwd) = &password {
+        if is_encrypted(&input)? {
+            println!("🔐 检测到 .enc 加密文件, 先解密...");
+            let tmp = PathBuf::from(format!("{}.tmp", input.display()));
+            let bar = Progress::new("解密中");
+            crypto::decrypt_file(&input, &tmp, pwd)?;
+            bar.finish("✅ 解密完成");
+            tmp
+        } else {
+            input.clone()
+        }
+    } else {
+        input.clone()
+    };
+
+    let bar = Progress::new("测试中");
+    let result = decompress::test_archive(&archive_path, password.as_deref(), &bar);
+    bar.finish("✅ 测试完成");
+
+    if archive_path != input {
+        let _ = std::fs::remove_file(&archive_path);
+    }
+
+    match result {
+        Ok((entries, bytes)) => {
+            println!(
+                "✅ 归档完整: {} 个条目, {}",
+                entries,
+                progress::format_bytes(bytes)
+            );
+            Ok(())
+        }
+        Err(e) => {
+            println!("❌ 归档损坏: {}", e);
+            Err(e)
+        }
+    }
+}
+
+/// 截断字符串到指定长度 (尾部加 ...)
+fn truncate_str(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        s.to_string()
+    } else {
+        let truncated: String = s.chars().take(max - 3).collect();
+        format!("{}...", truncated)
+    }
 }
 
 fn is_encrypted(path: &std::path::Path) -> Result<bool> {

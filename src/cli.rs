@@ -43,6 +43,15 @@ pub enum Commands {
         /// 用密码加密归档 (ZIP/7z 使用 AES-256, 兼容 7-Zip/WinRAR/Bandizip)
         #[arg(long)]
         password: Option<String>,
+
+        /// 排除文件/目录 (通配符, 可多次指定)
+        /// 例: --exclude "*.tmp" --exclude ".git" --exclude "*.log"
+        #[arg(long)]
+        exclude: Vec<String>,
+
+        /// 分卷大小 (例: 100M, 700M, 1G), 仅 ZIP 支持
+        #[arg(long)]
+        split: Option<String>,
     },
     /// 解压归档 (自动识别格式) / Extract archive (auto-detect format)
     Decompress {
@@ -102,5 +111,19 @@ pub enum Commands {
         password: Option<String>,
         #[arg(short, long)]
         format: Option<String>,
+    },
+    /// 列出归档内容 (不解压) / List archive contents
+    List {
+        #[arg(short, long)]
+        input: PathBuf,
+        #[arg(long)]
+        password: Option<String>,
+    },
+    /// 测试归档完整性 / Test archive integrity
+    Test {
+        #[arg(short, long)]
+        input: PathBuf,
+        #[arg(long)]
+        password: Option<String>,
     },
 }

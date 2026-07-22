@@ -9,6 +9,7 @@ use crate::crypto;
 use crate::decompress;
 use crate::format::{detect, Container};
 use crate::i18n::{self, Lang};
+use crate::archive_list::ArchiveEntry;
 use crossbeam_channel::{unbounded, Receiver, Sender};
 use eframe::egui;
 use eframe::egui::{Color32, FontId, RichText, Vec2};
@@ -33,6 +34,12 @@ const TEXT_DIM: Color32 = Color32::from_rgb(150, 160, 180);
 enum WorkMsg {
     Log(String, MsgKind),
     Progress(f32),
+    /// (bytes_done, bytes_total) — 用于显示速度/ETA
+    ProgressDetail(u64, u64),
+    /// 归档列表结果
+    ArchiveList(Vec<ArchiveEntry>),
+    /// 完整性测试结果 (摘要, 是否通过)
+    TestResult(String, bool),
     Done(bool, String),
 }
 
@@ -60,6 +67,56 @@ enum Mode {
     Decrypt,
 }
 
+/// UI 主题
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Theme {
+    Dark,
+    Light,
+}
+
+impl Theme {
+    fn toggle(self) -> Self {
+        match self {
+            Theme::Dark => Theme::Light,
+            Theme::Light => Theme::Dark,
+        }
+    }
+
+    fn icon(self) -> &'static str {
+        match self {
+            Theme::Dark => "🌙",
+            Theme::Light => "☀️",
+        }
+    }
+}
+
+/// 主题色板 (根据主题动态返回)
+struct Palette {
+    bg: Color32,
+    panel: Color32,
+    text: Color32,
+    text_dim: Color32,
+}
+
+impl Palette {
+    fn from(theme: Theme) -> Self {
+        match theme {
+            Theme::Dark => Self {
+                bg: BG,
+                panel: PANEL,
+                text: TEXT,
+                text_dim: TEXT_DIM,
+            },
+            Theme::Light => Self {
+                bg: Color32::from_rgb(238, 240, 244),
+                panel: Color32::from_rgb(248, 250, 252),
+                text: Color32::from_rgb(30, 34, 42),
+                text_dim: Color32::from_rgb(110, 120, 135),
+            },
+        }
+    }
+}
+
 impl Mode {
     fn title(&self) -> &'static str {
         match self {
@@ -79,11 +136,37 @@ pub struct App {
     level: i32,
     password: String,
     encrypt_archive: bool,
+    /// 密码可见性切换
+    show_password: bool,
+    /// 文件排除规则 (通配符, 逗号分隔输入)
+    exclude_patterns: String,
+    /// 分卷大小 (例: 100M, 1G), 留空则不分卷
+    split_size: String,
 
     logs: Vec<LogEntry>,
     progress: f32,
+    /// 进度详情: (bytes_done, bytes_total)
+    progress_detail: (u64, u64),
     working: bool,
     status_text: String,
+    /// 取消标志 (工作线程通过此标志检测取消请求)
+    cancel_flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
+
+    /// 归档内容浏览 (List 结果)
+    archive_entries: Vec<ArchiveEntry>,
+    /// 是否显示归档列表面板
+    show_archive_panel: bool,
+
+    /// 最近使用的文件路径
+    recent_files: Vec<String>,
+
+    /// Toast 通知 (消息, 显示截止时间)
+    toast: Option<(String, MsgKind, Instant)>,
+
+    /// 当前 UI 主题
+    theme: Theme,
+    /// 压缩/加密后安全删除源文件
+    secure_delete: bool,
 
     tx: Sender<WorkMsg>,
     rx: Receiver<WorkMsg>,
@@ -101,10 +184,21 @@ impl Default for App {
             level: 3,
             password: String::new(),
             encrypt_archive: false,
+            show_password: false,
+            exclude_patterns: String::new(),
+            split_size: String::new(),
             logs: Vec::new(),
             progress: 0.0,
+            progress_detail: (0, 0),
             working: false,
             status_text: i18n::t("ready").to_string(),
+            cancel_flag: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            archive_entries: Vec::new(),
+            show_archive_panel: false,
+            recent_files: Vec::new(),
+            toast: None,
+            theme: Theme::Dark,
+            secure_delete: false,
             tx,
             rx,
             worker_handle: None,
@@ -134,7 +228,9 @@ impl App {
 
     fn pick_input_file(&mut self) {
         if let Some(path) = rfd::FileDialog::new().pick_file() {
-            self.input_path = path.display().to_string();
+            let s = path.display().to_string();
+            self.add_recent_file(&s);
+            self.input_path = s;
             self.output_path.clear();
             self.auto_fill_output();
             self.maybe_switch_mode_by_input();
@@ -143,7 +239,9 @@ impl App {
 
     fn pick_input_dir(&mut self) {
         if let Some(path) = rfd::FileDialog::new().pick_folder() {
-            self.input_path = path.display().to_string();
+            let s = path.display().to_string();
+            self.add_recent_file(&s);
+            self.input_path = s;
             self.output_path.clear();
             self.auto_fill_output();
         }
@@ -351,7 +449,26 @@ impl App {
         let level = self.level;
         let container = self.current_container();
         let encrypt_after = self.encrypt_archive;
+        let secure_delete = self.secure_delete;
         let mode = self.mode.clone();
+
+        // 解析排除规则 (逗号分隔)
+        let excludes: Vec<String> = if self.exclude_patterns.trim().is_empty() {
+            Vec::new()
+        } else {
+            self.exclude_patterns
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect()
+        };
+
+        // 解析分卷大小
+        let split = if self.split_size.trim().is_empty() {
+            None
+        } else {
+            Some(self.split_size.trim().to_string())
+        };
 
         if input.is_empty() {
             self.log(i18n::t("select_input"), MsgKind::Error);
@@ -364,7 +481,9 @@ impl App {
 
         self.logs.clear();
         self.progress = 0.0;
+        self.progress_detail = (0, 0);
         self.working = true;
+        self.cancel_flag.store(false, std::sync::atomic::Ordering::Relaxed);
         self.status_text = i18n::t("processing").to_string();
         self.log(
             &format!("{}{}", i18n::t("start_prefix"), mode.title()),
@@ -374,10 +493,20 @@ impl App {
         if !output.is_empty() {
             self.log(&format!("  {}: {}", i18n::t("output"), output), MsgKind::Info);
         }
+        if !excludes.is_empty() {
+            self.log(&format!("  {}: {}", i18n::t("exclude_label"), excludes.join(", ")), MsgKind::Info);
+        }
+        if let Some(s) = &split {
+            self.log(&format!("  {}: {}", i18n::t("split_label"), s), MsgKind::Info);
+        }
 
         let tx = self.tx.clone();
+        let cancel = self.cancel_flag.clone();
         let handle = std::thread::spawn(move || {
-            let result = run_task(mode, input, output, password, level, container, encrypt_after, tx.clone());
+            let result = run_task(
+                mode, input, output, password, level, container, encrypt_after,
+                excludes, split, secure_delete, cancel, tx.clone(),
+            );
             match result {
                 Ok(summary) => {
                     let _ = tx.send(WorkMsg::Progress(1.0));
@@ -396,6 +525,15 @@ impl App {
         self.worker_handle = Some(handle);
     }
 
+    /// 取消当前任务
+    fn cancel_work(&mut self) {
+        if !self.working {
+            return;
+        }
+        self.cancel_flag.store(true, std::sync::atomic::Ordering::Relaxed);
+        self.log(i18n::t("cancel_requested"), MsgKind::Warn);
+    }
+
     fn pump_messages(&mut self) {
         while let Ok(msg) = self.rx.try_recv() {
             match msg {
@@ -409,21 +547,180 @@ impl App {
                 WorkMsg::Progress(p) => {
                     self.progress = p.clamp(0.0, 1.0);
                 }
+                WorkMsg::ProgressDetail(done, total) => {
+                    self.progress_detail = (done, total);
+                }
+                WorkMsg::ArchiveList(entries) => {
+                    self.working = false;
+                    self.archive_entries = entries;
+                    self.show_archive_panel = true;
+                    self.status_text = i18n::t("done").to_string();
+                    let count = self.archive_entries.len();
+                    self.show_toast(&format!("📋 {} {}", count, i18n::t("entries")), MsgKind::Success);
+                }
+                WorkMsg::TestResult(summary, ok) => {
+                    self.working = false;
+                    self.status_text = if ok { i18n::t("done").to_string() } else { i18n::t("failed").to_string() };
+                    if ok {
+                        self.log(&format!("✅ {}", summary), MsgKind::Success);
+                        self.show_toast(&summary, MsgKind::Success);
+                    } else {
+                        self.log(&format!("❌ {}", summary), MsgKind::Error);
+                        self.show_toast(&summary, MsgKind::Error);
+                    }
+                }
                 WorkMsg::Done(ok, summary) => {
                     self.working = false;
+                    self.progress_detail = (0, 0);
                     if ok {
                         self.status_text = i18n::t("done").to_string();
                         self.log(&format!("✅ {}", summary), MsgKind::Success);
+                        self.show_toast(&summary, MsgKind::Success);
                     } else {
                         self.status_text = i18n::t("failed").to_string();
                         self.log(
                             &format!("{}{}", i18n::t("fail_prefix"), summary),
                             MsgKind::Error,
                         );
+                        self.show_toast(&format!("{}{}", i18n::t("fail_prefix"), summary), MsgKind::Error);
                     }
                 }
             }
         }
+    }
+
+    /// 显示 Toast 通知 (3秒后自动消失)
+    fn show_toast(&mut self, msg: &str, kind: MsgKind) {
+        self.toast = Some((msg.to_string(), kind, Instant::now() + Duration::from_secs(3)));
+    }
+
+    /// 添加最近文件
+    fn add_recent_file(&mut self, path: &str) {
+        if path.is_empty() {
+            return;
+        }
+        self.recent_files.retain(|p| p != path);
+        self.recent_files.insert(0, path.to_string());
+        if self.recent_files.len() > 8 {
+            self.recent_files.truncate(8);
+        }
+    }
+
+    /// 浏览归档内容 (List)
+    fn list_archive_gui(&mut self) {
+        if self.working {
+            return;
+        }
+        let input = self.input_path.trim().to_string();
+        if input.is_empty() {
+            self.log(i18n::t("select_input"), MsgKind::Error);
+            return;
+        }
+        let p = std::path::Path::new(&input);
+        if !p.exists() {
+            self.log(i18n::t("input_not_exist"), MsgKind::Error);
+            return;
+        }
+
+        self.working = true;
+        self.status_text = i18n::t("processing").to_string();
+        self.log(&format!("📋 {}", i18n::t("list_archive")), MsgKind::Info);
+
+        let password = if self.password.is_empty() { None } else { Some(self.password.clone()) };
+        let tx = self.tx.clone();
+        let handle = std::thread::spawn(move || {
+            match crate::archive_list::list_archive(std::path::Path::new(&input), password.as_deref()) {
+                Ok(entries) => {
+                    let _ = tx.send(WorkMsg::ArchiveList(entries));
+                }
+                Err(e) => {
+                    let e = friendly_error(e);
+                    let _ = tx.send(WorkMsg::Log(
+                        format!("{}{}", i18n::t("error_prefix"), e),
+                        MsgKind::Error,
+                    ));
+                    let _ = tx.send(WorkMsg::Done(false, e.to_string()));
+                }
+            }
+        });
+        self.worker_handle = Some(handle);
+    }
+
+    /// 测试归档完整性
+    fn test_archive_gui(&mut self) {
+        if self.working {
+            return;
+        }
+        let input = self.input_path.trim().to_string();
+        if input.is_empty() {
+            self.log(i18n::t("select_input"), MsgKind::Error);
+            return;
+        }
+        let p = std::path::Path::new(&input);
+        if !p.exists() {
+            self.log(i18n::t("input_not_exist"), MsgKind::Error);
+            return;
+        }
+
+        self.working = true;
+        self.status_text = i18n::t("processing").to_string();
+        self.log(&format!("🧪 {}", i18n::t("test_archive")), MsgKind::Info);
+
+        let password = if self.password.is_empty() { None } else { Some(self.password.clone()) };
+        let tx = self.tx.clone();
+        let handle = std::thread::spawn(move || {
+            let bar = make_progress(&tx);
+            match crate::decompress::test_archive(std::path::Path::new(&input), password.as_deref(), &bar) {
+                Ok((entries, bytes)) => {
+                    let summary = format!(
+                        "{}: {} {}, {}",
+                        i18n::t("test_pass"),
+                        entries,
+                        i18n::t("entries"),
+                        crate::progress::format_bytes(bytes)
+                    );
+                    let _ = tx.send(WorkMsg::TestResult(summary, true));
+                }
+                Err(e) => {
+                    let e = friendly_error(e);
+                    let summary = format!("{}: {}", i18n::t("test_fail"), e);
+                    let _ = tx.send(WorkMsg::TestResult(summary, false));
+                }
+            }
+        });
+        self.worker_handle = Some(handle);
+    }
+
+    /// 生成随机密码
+    fn generate_password(&mut self) {
+        use std::time::SystemTime;
+        let seed = SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos() as u64;
+
+        const UPPER: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ";
+        const LOWER: &[u8] = b"abcdefghijkmnpqrstuvwxyz";
+        const DIGIT: &[u8] = b"23456789";
+        const SPECIAL: &[u8] = b"!@#$%^&*-_+=";
+        let len = 16;
+        let mut pwd = String::with_capacity(len);
+        let mut state = seed;
+        for i in 0..len {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            let pool = match i % 4 {
+                0 => UPPER,
+                1 => LOWER,
+                2 => DIGIT,
+                _ => SPECIAL,
+            };
+            let idx = (state % pool.len() as u64) as usize;
+            pwd.push(pool[idx] as char);
+        }
+        self.password = pwd;
+        self.show_toast("🔐 密码已生成", MsgKind::Info);
     }
 }
 
@@ -454,12 +751,18 @@ fn friendly_error(e: anyhow::Error) -> anyhow::Error {
 /// 创建带 GUI 实时进度回调的 Progress
 fn make_progress(tx: &Sender<WorkMsg>) -> crate::progress::Progress {
     let tx_clone = tx.clone();
-    let callback: crate::progress::ProgressCallback = std::sync::Arc::new(move |cur, total| {
-        if total > 0 {
-            let pct = cur as f32 / total as f32;
-            let _ = tx_clone.send(WorkMsg::Progress(pct.min(1.0)));
-        }
-    });
+    let callback: crate::progress::ProgressCallback = std::sync::Arc::new(
+        move |cur, total, bytes_done, bytes_total| {
+            if total > 0 {
+                let pct = cur as f32 / total as f32;
+                let _ = tx_clone.send(WorkMsg::Progress(pct.min(1.0)));
+            }
+            // 发送字节级详情 (速度/ETA)
+            if bytes_total > 0 || bytes_done > 0 {
+                let _ = tx_clone.send(WorkMsg::ProgressDetail(bytes_done, bytes_total));
+            }
+        },
+    );
     crate::progress::Progress::new_with_callback("", callback)
 }
 
@@ -471,9 +774,22 @@ fn run_task(
     level: i32,
     container: Container,
     encrypt_after: bool,
+    excludes: Vec<String>,
+    split: Option<String>,
+    secure_delete: bool,
+    cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
     tx: Sender<WorkMsg>,
 ) -> anyhow::Result<String> {
     let inp = std::path::Path::new(&input);
+    /// 检查取消标志
+    macro_rules! check_cancel {
+        () => {
+            if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                return Err(anyhow::anyhow!("{}", i18n::t("cancelled")));
+            }
+        };
+    }
+
     match mode {
         Mode::Compress => {
             let out_path = if output.is_empty() {
@@ -499,11 +815,41 @@ fn run_task(
             } else {
                 None
             };
-            compress::compress(inp, &out_path, container, level, archive_pwd, &bar)?;
+
+            // 有排除规则 → 使用 compress_with_exclude
+            if excludes.is_empty() {
+                compress::compress(inp, &out_path, container, level, archive_pwd, &bar)?;
+            } else {
+                compress::compress_with_exclude(inp, &out_path, container, level, archive_pwd, &bar, &excludes)?;
+            }
+
+            check_cancel!();
 
             let mut final_path = out_path.clone();
+
+            // 分卷切割
+            if let Some(split_str) = &split {
+                if let Ok(split_size) = compress::parse_split_size(split_str) {
+                    let parts = compress::split_file(&out_path, split_size)?;
+                    if parts.len() > 1 {
+                        let _ = tx.send(WorkMsg::Log(
+                            format!("✂️ {}: {} 个分卷", i18n::t("split_label"), parts.len()),
+                            MsgKind::Info,
+                        ));
+                        let elapsed = start.elapsed();
+                        return Ok(format!(
+                            "{} ({:.2}s, {} 个分卷)",
+                            i18n::t("compress_done"),
+                            elapsed.as_secs_f64(),
+                            parts.len()
+                        ));
+                    }
+                }
+            }
+
             // 对不支持内嵌加密的容器, 退回 .enc 包装
             if encrypt_after && !password.is_empty() && !container.supports_encryption() {
+                check_cancel!();
                 let _ = tx.send(WorkMsg::Log(
                     i18n::t("encrypting").to_string(),
                     MsgKind::Info,
@@ -513,6 +859,16 @@ fn run_task(
                 let _ = std::fs::remove_file(&out_path);
                 final_path = enc_out;
                 let _ = tx.send(WorkMsg::Progress(0.95));
+            }
+
+            // 安全删除源文件
+            if secure_delete {
+                check_cancel!();
+                let _ = tx.send(WorkMsg::Log(
+                    i18n::t("secure_delete_done").to_string(),
+                    MsgKind::Info,
+                ));
+                secure_delete_path(inp);
             }
 
             let elapsed = start.elapsed();
@@ -559,12 +915,15 @@ fn run_task(
                 inp.to_path_buf()
             };
 
+            check_cancel!();
+
             if detect(&archive_path).is_some() {
                 std::fs::create_dir_all(&out_dir)?;
                 let bar = make_progress(&tx);
                 // 传递密码给归档解压 (zip/7z/rar 加密归档)
                 decompress::decompress_with_password(&archive_path, &out_dir, pwd_opt, &bar)?;
                 let _ = tx.send(WorkMsg::Progress(0.95));
+                // 清理临时文件
                 if archive_path != inp {
                     let _ = std::fs::remove_file(&archive_path);
                 }
@@ -588,6 +947,15 @@ fn run_task(
             let start = Instant::now();
             crypto::encrypt_file(inp, &out_path, &password)?;
             let _ = tx.send(WorkMsg::Progress(0.95));
+            // 安全删除源文件
+            if secure_delete {
+                check_cancel!();
+                let _ = tx.send(WorkMsg::Log(
+                    i18n::t("secure_delete_done").to_string(),
+                    MsgKind::Info,
+                ));
+                secure_delete_path(inp);
+            }
             let elapsed = start.elapsed();
             let size = std::fs::metadata(&out_path).map(|m| m.len()).unwrap_or(0);
             Ok(format!(
@@ -610,6 +978,8 @@ fn run_task(
             crypto::decrypt_file(inp, &out_path, &password)?;
             let _ = tx.send(WorkMsg::Progress(0.95));
 
+            check_cancel!();
+
             if detect(&out_path).is_some() {
                 let _ = tx.send(WorkMsg::Log(
                     i18n::t("continue_extract").to_string(),
@@ -619,6 +989,7 @@ fn run_task(
                 std::fs::create_dir_all(&extract_dir)?;
                 let bar = make_progress(&tx);
                 decompress::decompress_with_password(&out_path, &extract_dir, None, &bar)?;
+                // 清理临时解密文件
                 let _ = std::fs::remove_file(&out_path);
             }
             let elapsed = start.elapsed();
@@ -739,6 +1110,82 @@ fn format_size(bytes: u64) -> String {
     }
 }
 
+/// 安全删除文件: 先用随机数据覆写 3 次, 再删除
+/// 对目录则递归安全删除其中所有文件, 最后移除目录
+fn secure_delete_path(path: &std::path::Path) {
+    if path.is_dir() {
+        // 递归安全删除目录内文件
+        let mut stack = vec![path.to_path_buf()];
+        let mut files = Vec::new();
+        while let Some(dir) = stack.pop() {
+            if let Ok(entries) = std::fs::read_dir(&dir) {
+                for entry in entries.flatten() {
+                    let p = entry.path();
+                    if p.is_dir() {
+                        stack.push(p);
+                    } else {
+                        files.push(p);
+                    }
+                }
+            }
+        }
+        for f in &files {
+            secure_delete_file(f);
+        }
+        // 删除空目录 (后序)
+        let _ = std::fs::remove_dir_all(path);
+    } else if path.is_file() {
+        secure_delete_file(path);
+    }
+}
+
+/// 安全删除单个文件: 覆写 3 次后删除
+fn secure_delete_file(path: &std::path::Path) {
+    let len = match std::fs::metadata(path) {
+        Ok(m) => m.len() as usize,
+        Err(_) => {
+            let _ = std::fs::remove_file(path);
+            return;
+        }
+    };
+    // 覆写 3 次: 全 0xFF / 全 0x00 / 随机
+    let patterns: [Vec<u8>; 3] = [
+        vec![0xFF; len.min(1024 * 1024)],
+        vec![0x00; len.min(1024 * 1024)],
+        {
+            use std::time::SystemTime;
+            let mut seed = SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos() as u64)
+                .unwrap_or(0xCAFE);
+            let mut buf = vec![0u8; len.min(1024 * 1024)];
+            for b in &mut buf {
+                seed ^= seed << 13;
+                seed ^= seed >> 7;
+                seed ^= seed << 17;
+                *b = (seed & 0xFF) as u8;
+            }
+            buf
+        },
+    ];
+    for pattern in &patterns {
+        if let Ok(mut f) = std::fs::OpenOptions::new().write(true).open(path) {
+            use std::io::Write;
+            let mut remaining = len;
+            while remaining > 0 {
+                let chunk = remaining.min(pattern.len());
+                if f.write_all(&pattern[..chunk]).is_err() {
+                    break;
+                }
+                remaining -= chunk;
+            }
+            let _ = f.flush();
+            let _ = f.sync_all();
+        }
+    }
+    let _ = std::fs::remove_file(path);
+}
+
 // ───────────────────────── eframe 实现 ─────────────────────────
 
 impl eframe::App for App {
@@ -748,14 +1195,60 @@ impl eframe::App for App {
             ctx.request_repaint_after(Duration::from_millis(80));
         }
 
-        // 自定义深色背景
-        let mut visuals = egui::Visuals::dark();
-        visuals.panel_fill = BG;
-        visuals.window_fill = PANEL;
-        ctx.set_visuals(visuals);
+        // ── 拖放支持 ──
+        let dropped = ctx.input(|i| i.raw.dropped_files.clone());
+        if !dropped.is_empty() {
+            for file in &dropped {
+                if let Some(path) = file.path.as_ref() {
+                    self.input_path = path.display().to_string();
+                    self.output_path.clear();
+                    self.auto_fill_output();
+                    self.maybe_switch_mode_by_input();
+                    self.add_recent_file(&path.display().to_string());
+                    break;
+                }
+            }
+        }
+
+        // ── 键盘快捷键 ──
+        ctx.input(|i| {
+            // Ctrl+Enter: 开始任务
+            if i.modifiers.ctrl && i.key_pressed(egui::Key::Enter) && !self.working {
+                self.start_work();
+            }
+            // Escape: 取消任务 或 关闭归档面板
+            if i.key_pressed(egui::Key::Escape) {
+                if self.show_archive_panel {
+                    self.show_archive_panel = false;
+                } else if self.working {
+                    self.cancel_work();
+                }
+            }
+            // Ctrl+L: 清空日志
+            if i.modifiers.ctrl && i.key_pressed(egui::Key::L) {
+                self.logs.clear();
+            }
+        });
+
+        // 根据主题设置 visuals
+        let pal = Palette::from(self.theme);
+        match self.theme {
+            Theme::Dark => {
+                let mut visuals = egui::Visuals::dark();
+                visuals.panel_fill = pal.bg;
+                visuals.window_fill = pal.panel;
+                ctx.set_visuals(visuals);
+            }
+            Theme::Light => {
+                let mut visuals = egui::Visuals::light();
+                visuals.panel_fill = pal.bg;
+                visuals.window_fill = pal.panel;
+                ctx.set_visuals(visuals);
+            }
+        }
 
         egui::CentralPanel::default()
-            .frame(egui::Frame::group(ctx.style().as_ref()).fill(BG).inner_margin(egui::Margin::same(16.0)))
+            .frame(egui::Frame::group(ctx.style().as_ref()).fill(pal.bg).inner_margin(egui::Margin::same(16.0)))
             .show(ctx, |ui| {
                 title_bar(ui, self);
 
@@ -778,6 +1271,14 @@ impl eframe::App for App {
                     right_panel(self, ui);
                 });
             });
+
+        // ── 归档列表面板 (浮动窗口) ──
+        if self.show_archive_panel {
+            archive_list_window(self, ctx);
+        }
+
+        // ── Toast 通知 ──
+        show_toast_overlay(self, ctx);
     }
 }
 
@@ -795,6 +1296,17 @@ fn title_bar(ui: &mut egui::Ui, app: &mut App) {
                 .font(FontId::proportional(13.0)),
         );
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            // 主题切换按钮
+            if ui.add_sized(
+                Vec2::new(40.0, 26.0),
+                egui::Button::new(
+                    RichText::new(app.theme.icon())
+                        .font(FontId::proportional(14.0)),
+                ),
+            ).clicked() {
+                app.theme = app.theme.toggle();
+            }
+            ui.add_space(4.0);
             // 语言切换按钮
             let lang = i18n::current_lang();
             let btn_label = match lang {
@@ -805,7 +1317,6 @@ fn title_bar(ui: &mut egui::Ui, app: &mut App) {
                 Vec2::new(72.0, 26.0),
                 egui::Button::new(
                     RichText::new(btn_label)
-                        .color(TEXT)
                         .font(FontId::proportional(12.0)),
                 ),
             ).clicked() {
@@ -915,6 +1426,27 @@ fn left_panel(app: &mut App, ui: &mut egui::Ui) {
                         app.extract_as();
                     }
                 });
+
+                // 浏览 + 测试 按钮
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    let list_btn = egui::Button::new(
+                        RichText::new(i18n::t("list_archive"))
+                            .font(FontId::proportional(12.0)),
+                    )
+                    .min_size(Vec2::new((ui.available_width() - 8.0) / 2.0, 28.0));
+                    if ui.add(list_btn).clicked() && !app.working {
+                        app.list_archive_gui();
+                    }
+                    let test_btn = egui::Button::new(
+                        RichText::new(i18n::t("test_archive"))
+                            .font(FontId::proportional(12.0)),
+                    )
+                    .min_size(Vec2::new(ui.available_width(), 28.0));
+                    if ui.add(test_btn).clicked() && !app.working {
+                        app.test_archive_gui();
+                    }
+                });
             }
 
             ui.add_space(10.0);
@@ -966,6 +1498,17 @@ fn left_panel(app: &mut App, ui: &mut egui::Ui) {
                 });
             }
 
+            // 安全删除源文件选项 (压缩/加密模式)
+            if matches!(app.mode, Mode::Compress | Mode::Encrypt) {
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    let _ = ui.checkbox(&mut app.secure_delete, i18n::t("secure_delete"));
+                    if app.secure_delete {
+                        ui.label(RichText::new("🗑️").color(WARN));
+                    }
+                });
+            }
+
             let need_password = matches!(app.mode, Mode::Encrypt | Mode::Decrypt)
                 || (app.mode == Mode::Compress && app.encrypt_archive)
                 || (app.mode == Mode::Decompress
@@ -978,34 +1521,109 @@ fn left_panel(app: &mut App, ui: &mut egui::Ui) {
             if need_password {
                 ui.add_space(8.0);
                 section_label(ui, i18n::t("password"));
+                ui.horizontal(|ui| {
+                    let _ = ui.add_sized(
+                        Vec2::new(ui.available_width() - 90.0, 28.0),
+                        egui::TextEdit::singleline(&mut app.password)
+                            .password(!app.show_password)
+                            .hint_text(i18n::t("password_hint")),
+                    );
+                    // 密码可见性切换按钮
+                    let eye = if app.show_password { "🙈" } else { "👁" };
+                    if ui.add_sized(Vec2::new(36.0, 28.0), egui::Button::new(eye)).clicked() {
+                        app.show_password = !app.show_password;
+                    }
+                    // 密码生成器按钮
+                    if ui.add_sized(Vec2::new(36.0, 28.0), egui::Button::new("🎲")).clicked() {
+                        app.generate_password();
+                    }
+                });
+            }
+
+            // 最近文件 (下拉选择)
+            if !app.recent_files.is_empty() && !app.working {
+                ui.add_space(8.0);
+                section_label(ui, i18n::t("recent_files"));
+                egui::ComboBox::from_id_salt("recent_combo")
+                    .selected_text("")
+                    .width(ui.available_width())
+                    .show_ui(ui, |ui| {
+                        for path in &app.recent_files.clone() {
+                            let label = std::path::Path::new(path)
+                                .file_name()
+                                .map(|s| s.to_string_lossy().to_string())
+                                .unwrap_or_else(|| path.clone());
+                            if ui.selectable_label(false, &label).clicked() {
+                                app.input_path = path.clone();
+                                app.output_path.clear();
+                                app.auto_fill_output();
+                                app.maybe_switch_mode_by_input();
+                            }
+                            ui.label(
+                                RichText::new(path)
+                                    .color(TEXT_DIM)
+                                    .font(FontId::monospace(10.0)),
+                            );
+                        }
+                    });
+            }
+
+            // 压缩模式: 排除规则 + 分卷大小
+            if app.mode == Mode::Compress {
+                ui.add_space(8.0);
+                section_label(ui, i18n::t("exclude_label"));
                 let _ = ui.add_sized(
                     Vec2::new(ui.available_width(), 28.0),
-                    egui::TextEdit::singleline(&mut app.password)
-                        .password(true)
-                        .hint_text(i18n::t("password_hint")),
+                    egui::TextEdit::singleline(&mut app.exclude_patterns)
+                        .hint_text(i18n::t("exclude_hint")),
+                );
+
+                ui.add_space(8.0);
+                section_label(ui, i18n::t("split_label"));
+                let _ = ui.add_sized(
+                    Vec2::new(ui.available_width(), 28.0),
+                    egui::TextEdit::singleline(&mut app.split_size)
+                        .hint_text(i18n::t("split_hint")),
                 );
             }
 
             ui.add_space(16.0);
 
-            let btn_text = if app.working {
-                app.status_text.clone()
-            } else {
-                format!("▶ {}", app.mode.title())
-            };
-            let btn_color = if app.working { ACCENT_DIM } else { ACCENT };
-            let btn = egui::Button::new(
-                RichText::new(btn_text)
-                    .color(Color32::WHITE)
-                    .font(FontId::proportional(15.0))
-                    .strong(),
-            )
-            .fill(btn_color)
-            .min_size(Vec2::new(ui.available_width(), 40.0));
-            let resp = ui.add(btn);
-            if resp.clicked() && !app.working {
-                app.start_work();
-            }
+            // 主按钮 + 取消按钮
+            ui.horizontal(|ui| {
+                let btn_text = if app.working {
+                    app.status_text.clone()
+                } else {
+                    format!("▶ {}", app.mode.title())
+                };
+                let btn_color = if app.working { ACCENT_DIM } else { ACCENT };
+                let btn = egui::Button::new(
+                    RichText::new(btn_text)
+                        .color(Color32::WHITE)
+                        .font(FontId::proportional(15.0))
+                        .strong(),
+                )
+                .fill(btn_color)
+                .min_size(Vec2::new(ui.available_width() - 80.0, 40.0));
+                let resp = ui.add(btn);
+                if resp.clicked() && !app.working {
+                    app.start_work();
+                }
+
+                // 取消按钮
+                if app.working {
+                    let cancel_btn = egui::Button::new(
+                        RichText::new("✕")
+                            .color(Color32::WHITE)
+                            .font(FontId::proportional(15.0)),
+                    )
+                    .fill(ERROR)
+                    .min_size(Vec2::new(40.0, 40.0));
+                    if ui.add(cancel_btn).clicked() {
+                        app.cancel_work();
+                    }
+                }
+            });
         });
 }
 
@@ -1078,6 +1696,21 @@ fn right_panel(app: &mut App, ui: &mut egui::Ui) {
                     .fill(ACCENT)
                     .desired_width(ui.available_width());
                 ui.add(bar);
+
+                // 进度详情: 字节数 + 速度 + ETA
+                let (done, total) = app.progress_detail;
+                if total > 0 && app.working {
+                    ui.add_space(4.0);
+                    ui.label(
+                        RichText::new(format!(
+                            "{} / {}",
+                            format_size(done),
+                            format_size(total)
+                        ))
+                        .color(TEXT_DIM)
+                        .font(FontId::monospace(11.0)),
+                    );
+                }
             });
 
         ui.add_space(12.0);
@@ -1154,6 +1787,153 @@ mod chrono_like {
         let s = secs % 60;
         format!("{:02}:{:02}:{:02}", h, m, s)
     }
+}
+
+/// 归档列表面板 (浮动窗口)
+fn archive_list_window(app: &mut App, ctx: &egui::Context) {
+    let mut open = true;
+    egui::Window::new(format!("📋 {}", i18n::t("list_archive")))
+        .open(&mut open)
+        .resizable(true)
+        .collapsible(false)
+        .min_width(500.0)
+        .min_height(350.0)
+        .default_width(640.0)
+        .default_height(450.0)
+        .show(ctx, |ui| {
+            if app.archive_entries.is_empty() {
+                ui.label(
+                    RichText::new("(空)")
+                        .color(TEXT_DIM)
+                        .font(FontId::proportional(14.0)),
+                );
+                return;
+            }
+
+            // 统计
+            let total_size: u64 = app.archive_entries.iter().map(|e| e.size).sum();
+            let total_compressed: u64 = app.archive_entries.iter().map(|e| e.compressed_size).sum();
+            let file_count = app.archive_entries.iter().filter(|e| !e.is_dir).count();
+            let dir_count = app.archive_entries.iter().filter(|e| e.is_dir).count();
+
+            ui.horizontal(|ui| {
+                ui.label(
+                    RichText::new(format!(
+                        "{}: {} · {}: {} · {}: {}",
+                        i18n::t("total"),
+                        app.archive_entries.len(),
+                        i18n::t("files"),
+                        file_count,
+                        i18n::t("dirs"),
+                        dir_count
+                    ))
+                    .color(TEXT_DIM)
+                    .font(FontId::proportional(12.0)),
+                );
+            });
+            ui.horizontal(|ui| {
+                ui.label(
+                    RichText::new(format!(
+                        "{}: {} · {}: {}",
+                        i18n::t("uncompressed"),
+                        format_size(total_size),
+                        i18n::t("compressed"),
+                        format_size(total_compressed)
+                    ))
+                    .color(TEXT_DIM)
+                    .font(FontId::monospace(11.0)),
+                );
+                if total_size > 0 {
+                    let ratio = (1.0 - total_compressed as f64 / total_size as f64) * 100.0;
+                    ui.label(
+                        RichText::new(format!("({:.1}% {})", ratio, i18n::t("saved")))
+                            .color(SUCCESS)
+                            .font(FontId::monospace(11.0)),
+                    );
+                }
+            });
+
+            ui.add_space(8.0);
+            ui.separator();
+            ui.add_space(4.0);
+
+            // 表头
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(i18n::t("name")).color(TEXT_DIM).font(FontId::proportional(12.0)).strong());
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(RichText::new(i18n::t("size")).color(TEXT_DIM).font(FontId::proportional(12.0)).strong());
+                });
+            });
+            ui.separator();
+
+            // 文件列表 (可滚动)
+            egui::ScrollArea::vertical()
+                .auto_shrink([false, true])
+                .show(ui, |ui| {
+                    for entry in &app.archive_entries {
+                        ui.horizontal(|ui| {
+                            let icon = if entry.is_dir { "📁" } else { "📄" };
+                            let color = if entry.is_dir { TEXT_DIM } else { TEXT };
+                            ui.label(
+                                RichText::new(format!("{} {}", icon, entry.name))
+                                    .color(color)
+                                    .font(FontId::monospace(11.0)),
+                            );
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                ui.label(
+                                    RichText::new(format_size(entry.size))
+                                        .color(TEXT_DIM)
+                                        .font(FontId::monospace(11.0)),
+                                );
+                            });
+                        });
+                    }
+                });
+        });
+
+    if !open {
+        app.show_archive_panel = false;
+    }
+}
+
+/// Toast 通知覆盖层
+fn show_toast_overlay(app: &mut App, ctx: &egui::Context) {
+    // 检查 Toast 是否过期
+    if let Some((_, _, expiry)) = &app.toast {
+        if Instant::now() >= *expiry {
+            app.toast = None;
+            return;
+        }
+    } else {
+        return;
+    }
+
+    let (msg, kind, _) = app.toast.as_ref().unwrap();
+    let color = match kind {
+        MsgKind::Info => ACCENT,
+        MsgKind::Success => SUCCESS,
+        MsgKind::Warn => WARN,
+        MsgKind::Error => ERROR,
+    };
+
+    egui::Area::new(egui::Id::new("toast_overlay"))
+        .order(egui::Order::Foreground)
+        .anchor(egui::Align2::RIGHT_TOP, Vec2::new(-20.0, 20.0))
+        .show(ctx, |ui| {
+            egui::Frame::group(ui.style())
+                .fill(PANEL)
+                .rounding(8.0)
+                .stroke(egui::Stroke::new(1.0, color))
+                .inner_margin(egui::Margin::same(12.0))
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new(msg).color(color).font(FontId::proportional(13.0)));
+                    });
+                });
+        });
+
+    // 请求重绘以更新过期检查
+    ctx.request_repaint_after(Duration::from_millis(500));
 }
 
 /// 启动 GUI

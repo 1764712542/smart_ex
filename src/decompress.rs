@@ -203,6 +203,8 @@ pub fn sevenz_decompress(
     password: Option<&str>,
     bar: &Progress,
 ) -> Result<()> {
+    // sevenz-rust 要求输出目录预先存在
+    std::fs::create_dir_all(output)?;
     let result = if let Some(pwd) = password {
         sevenz_rust::decompress_file_with_password(input, output, pwd.into())
     } else {
@@ -410,4 +412,195 @@ pub fn decompress_with(
         Container::TarLz4 => tarlz4_decompress(input, output, bar),
         Container::Single => single_decompress(input, output, bar),
     }
+}
+
+// ───────────────────────── 完整性测试 ─────────────────────────
+
+/// 测试归档完整性 (不解压到磁盘, 仅校验数据流)
+///
+/// 对每个条目尝试读取并丢弃数据, 若中途遇到 CRC/解压错误则归档损坏.
+/// 返回 (条目数, 总字节数).
+pub fn test_archive(input: &Path, password: Option<&str>, bar: &Progress) -> Result<(u64, u64)> {
+    let container = detect(input).ok_or_else(|| {
+        anyhow::anyhow!("无法识别归档格式: {}", input.display())
+    })?;
+
+    match container {
+        Container::Zip => test_zip(input, password, bar),
+        Container::SevenZ => test_7z(input, password, bar),
+        Container::Rar => test_rar(input, password, bar),
+        Container::Tar => test_tar(File::open(input)?, bar),
+        Container::TarGz => test_tar(
+            flate2::read::GzDecoder::new(BufReader::with_capacity(BUF_SIZE, File::open(input)?)),
+            bar,
+        ),
+        Container::TarXz => test_tar(
+            xz2::read::XzDecoder::new(BufReader::with_capacity(BUF_SIZE, File::open(input)?)),
+            bar,
+        ),
+        Container::TarZst => {
+            let dec = zstd::Decoder::new(File::open(input)?)
+                .map_err(|e| anyhow::anyhow!("zstd 解码器初始化失败: {}", e))?;
+            test_tar(dec, bar)
+        }
+        Container::TarBz2 => test_tar(
+            bzip2::read::BzDecoder::new(BufReader::with_capacity(BUF_SIZE, File::open(input)?)),
+            bar,
+        ),
+        Container::TarLz4 => {
+            let dec = lz4::Decoder::new(File::open(input)?)
+                .map_err(|e| anyhow::anyhow!("lz4 解码器初始化失败: {}", e))?;
+            test_tar(dec, bar)
+        }
+        Container::Single => test_single(input, bar),
+    }
+}
+
+/// 测试 ZIP: 逐条目读取并丢弃, 校验 CRC
+fn test_zip(input: &Path, password: Option<&str>, bar: &Progress) -> Result<(u64, u64)> {
+    let file = File::open(input)?;
+    let mut archive = zip::ZipArchive::new(file)?;
+    let total = archive.len() as u64;
+    bar.set_total(total);
+
+    let pwd_bytes = password.map(|s| s.as_bytes());
+    let mut entries = 0u64;
+    let mut total_bytes = 0u64;
+
+    for i in 0..archive.len() {
+        let mut entry = if let Some(pwd) = pwd_bytes {
+            archive.by_index_decrypt(i, pwd)
+        } else {
+            archive.by_index(i)
+        }?;
+
+        if !entry.is_dir() {
+            // 读取并丢弃数据, 触发 CRC 校验
+            let mut buf = vec![0u8; BUF_SIZE];
+            loop {
+                let n = entry.read(&mut buf)?;
+                if n == 0 {
+                    break;
+                }
+                total_bytes += n as u64;
+            }
+        }
+        entries += 1;
+        bar.inc(1);
+    }
+    Ok((entries, total_bytes))
+}
+
+/// 测试 7z: 解压到临时目录后删除 (sevenz-rust 无流式 test API)
+fn test_7z(input: &Path, password: Option<&str>, bar: &Progress) -> Result<(u64, u64)> {
+    let tmp = std::env::temp_dir().join(format!(
+        "smart_ex_test_{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&tmp)?;
+
+    let result = if let Some(pwd) = password {
+        sevenz_rust::decompress_file_with_password(input, &tmp, pwd.into())
+    } else {
+        sevenz_rust::decompress_file(input, &tmp)
+    };
+
+    let _ = std::fs::remove_dir_all(&tmp);
+
+    result.map_err(|e| anyhow::anyhow!("7z 完整性测试失败: {}", e))?;
+    bar.set_total(1);
+    bar.inc(1);
+    Ok((1, 0))
+}
+
+/// 测试 RAR: 逐条目读取头部并跳过 (验证结构完整性)
+fn test_rar(input: &Path, password: Option<&str>, bar: &Progress) -> Result<(u64, u64)> {
+    let first = unrar::Archive::new(input).as_first_part();
+    let mut open = if let Some(pwd) = password {
+        unrar::Archive::with_password(first.filename(), pwd).open_for_processing()
+    } else {
+        first.open_for_processing()
+    }
+    .map_err(|e| anyhow::anyhow!("打开 RAR 失败: {}", e))?;
+
+    let mut count = 0u64;
+    loop {
+        match open
+            .read_header()
+            .map_err(|e| anyhow::anyhow!("读取 RAR 头部失败: {}", e))?
+        {
+            Some(entry) => {
+                // 读取头部成功即跳过 (验证头部可解析)
+                open = entry
+                    .skip()
+                    .map_err(|e| anyhow::anyhow!("跳过 RAR 条目失败: {}", e))?;
+                count += 1;
+                bar.set_total(count);
+                bar.inc(1);
+            }
+            None => break,
+        }
+    }
+    Ok((count, 0))
+}
+
+/// 测试 tar 系列: 遍历条目并读取丢弃数据
+fn test_tar<R: Read>(reader: R, bar: &Progress) -> Result<(u64, u64)> {
+    let mut archive = tar::Archive::new(BufReader::with_capacity(BUF_SIZE, reader));
+    let mut entries = 0u64;
+    let mut total_bytes = 0u64;
+
+    for entry in archive.entries()? {
+        let mut entry = entry?;
+        if !entry.header().entry_type().is_dir() {
+            let mut buf = vec![0u8; BUF_SIZE];
+            loop {
+                let n = entry.read(&mut buf)?;
+                if n == 0 {
+                    break;
+                }
+                total_bytes += n as u64;
+            }
+        }
+        entries += 1;
+        bar.set_total(entries);
+        bar.inc(1);
+    }
+    Ok((entries, total_bytes))
+}
+
+/// 测试单文件流: 解压并丢弃
+fn test_single(input: &Path, bar: &Progress) -> Result<(u64, u64)> {
+    bar.set_total(1);
+    let name = input
+        .file_name()
+        .map(|s| s.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+
+    let reader = BufReader::with_capacity(BUF_SIZE, File::open(input)?);
+    let mut sink = io::sink();
+
+    let total_bytes = if name.ends_with(".gz") {
+        let mut dec = flate2::read::GzDecoder::new(reader);
+        copy_large(&mut dec, &mut sink)?
+    } else if name.ends_with(".xz") {
+        let mut dec = xz2::read::XzDecoder::new(reader);
+        copy_large(&mut dec, &mut sink)?
+    } else if name.ends_with(".zst") {
+        let mut dec = zstd::Decoder::new(reader)?;
+        copy_large(&mut dec, &mut sink)?
+    } else if name.ends_with(".bz2") {
+        let mut dec = bzip2::read::BzDecoder::new(reader);
+        copy_large(&mut dec, &mut sink)?
+    } else if name.ends_with(".lz4") {
+        let mut dec = lz4::Decoder::new(reader)?;
+        copy_large(&mut dec, &mut sink)?
+    } else {
+        return Err(anyhow::anyhow!("无法识别的单文件压缩格式: {}", name));
+    };
+    bar.inc(1);
+    Ok((1, total_bytes))
 }

@@ -72,7 +72,7 @@ fn t_zh(key: &str) -> &'static str {
         // ─── 通用 ───
         "app_name" => "⚡ smart_ex",
         "app_tagline" => "智能压缩 · 加密 · 解压",
-        "app_version" => "v0.3 · 14+ 格式",
+        "app_version" => "v0.5 · 14+ 格式",
         "ready" => "就绪",
         "processing" => "处理中...",
         "done" => "完成",
@@ -104,6 +104,10 @@ fn t_zh(key: &str) -> &'static str {
         "encrypt_after" => "压缩后加密归档",
         "password" => "密码",
         "password_hint" => "AES-256 密钥",
+        "exclude_label" => "排除规则",
+        "exclude_hint" => "*.tmp, *.log, .git (逗号分隔)",
+        "split_label" => "分卷大小",
+        "split_hint" => "100M, 700M, 1G (留空不分卷)",
 
         // ─── 解压快捷操作 ───
         "extract_here" => "📂 解压到当前文件夹",
@@ -130,6 +134,8 @@ fn t_zh(key: &str) -> &'static str {
         "decrypt_done" => "解密完成",
         "error_prefix" => "❌ 错误: ",
         "fail_prefix" => "❌ 失败: ",
+        "cancelled" => "已取消",
+        "cancel_requested" => "正在取消...",
         "perm_denied" => "权限不足 (macOS 隐私保护). 请在 系统设置 → 隐私与安全性 → 完全磁盘访问权限 中添加 smart_ex, 或将文件移动到非受保护目录 (如主目录). macOS 受保护目录: 下载/桌面/文稿",
         "perm_denied_short" => "权限不足, 请授予完全磁盘访问权限",
 
@@ -147,6 +153,34 @@ fn t_zh(key: &str) -> &'static str {
         "encoding_gbk" => "GBK (中文)",
         "encoding_shiftjis" => "Shift-JIS (日文)",
 
+        // ─── 归档浏览 / 测试 ───
+        "list_archive" => "浏览归档内容",
+        "test_archive" => "完整性测试",
+        "entries" => "个条目",
+        "test_pass" => "✅ 测试通过",
+        "test_fail" => "❌ 测试失败",
+        "recent_files" => "最近文件",
+        "total" => "总数",
+        "files" => "文件",
+        "dirs" => "目录",
+        "name" => "名称",
+        "size" => "大小",
+        "uncompressed" => "原始",
+        "compressed" => "压缩后",
+        "saved" => "已节省",
+
+        // ─── 主题 / 其他 ───
+        "theme" => "主题",
+        "theme_dark" => "深色",
+        "theme_light" => "浅色",
+        "theme_auto" => "跟随系统",
+        "start" => "开始",
+        "cancel_work" => "取消任务",
+        "drag_drop_hint" => "拖放文件到此处",
+        "pwd_generated" => "已生成强密码",
+        "secure_delete" => "安全删除源文件",
+        "secure_delete_done" => "源文件已安全删除",
+
         _ => "",
     }
 }
@@ -156,7 +190,7 @@ fn t_en(key: &str) -> &'static str {
         // ─── General ───
         "app_name" => "⚡ smart_ex",
         "app_tagline" => "Smart · Compress · Encrypt · Extract",
-        "app_version" => "v0.3 · 14+ formats",
+        "app_version" => "v0.5 · 14+ formats",
         "ready" => "Ready",
         "processing" => "Processing...",
         "done" => "Done",
@@ -188,6 +222,10 @@ fn t_en(key: &str) -> &'static str {
         "encrypt_after" => "Encrypt archive after compression",
         "password" => "Password",
         "password_hint" => "AES-256 key",
+        "exclude_label" => "Exclude",
+        "exclude_hint" => "*.tmp, *.log, .git (comma separated)",
+        "split_label" => "Split size",
+        "split_hint" => "100M, 700M, 1G (empty = no split)",
 
         // ─── Extract quick actions ───
         "extract_here" => "📂 Extract Here",
@@ -214,6 +252,8 @@ fn t_en(key: &str) -> &'static str {
         "decrypt_done" => "Decryption done",
         "error_prefix" => "❌ Error: ",
         "fail_prefix" => "❌ Failed: ",
+        "cancelled" => "Cancelled",
+        "cancel_requested" => "Cancelling...",
         "perm_denied" => "Permission denied (macOS TCC). Please add smart_ex to System Settings → Privacy & Security → Full Disk Access, or move files to a non-protected directory (e.g. home). Protected: Downloads/Desktop/Documents",
         "perm_denied_short" => "Permission denied, please grant Full Disk Access",
 
@@ -230,6 +270,34 @@ fn t_en(key: &str) -> &'static str {
         "encoding_utf8" => "UTF-8",
         "encoding_gbk" => "GBK (Chinese)",
         "encoding_shiftjis" => "Shift-JIS (Japanese)",
+
+        // ─── Archive browsing / testing ───
+        "list_archive" => "Browse Archive",
+        "test_archive" => "Integrity Test",
+        "entries" => "entries",
+        "test_pass" => "✅ Test passed",
+        "test_fail" => "❌ Test failed",
+        "recent_files" => "Recent Files",
+        "total" => "Total",
+        "files" => "files",
+        "dirs" => "dirs",
+        "name" => "Name",
+        "size" => "Size",
+        "uncompressed" => "Uncompressed",
+        "compressed" => "Compressed",
+        "saved" => "saved",
+
+        // ─── Theme / others ───
+        "theme" => "Theme",
+        "theme_dark" => "Dark",
+        "theme_light" => "Light",
+        "theme_auto" => "System",
+        "start" => "Start",
+        "cancel_work" => "Cancel Task",
+        "drag_drop_hint" => "Drop files here",
+        "pwd_generated" => "Strong password generated",
+        "secure_delete" => "Secure-delete source files",
+        "secure_delete_done" => "Source files securely deleted",
 
         _ => "",
     }

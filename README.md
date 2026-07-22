@@ -5,9 +5,27 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Platform](https://img.shields.io/badge/Platform-macOS%20%7C%20Linux%20%7C%20Windows-blue)](https://github.com/smartex/smart_ex)
 [![Rust](https://img.shields.io/badge/Rust-2021-orange.svg)](https://www.rust-lang.org/)
-[![Version](https://img.shields.io/badge/Version-0.4.0-green.svg)](https://github.com/smartex/smart_ex/releases)
+[![Version](https://img.shields.io/badge/Version-0.5.0-green.svg)](https://github.com/smartex/smart_ex/releases)
 
 smart_ex 是一个用 Rust 编写的跨平台压缩/解压/加密工具，支持 14+ 种压缩格式，内置优美的深色玻璃拟态 GUI，兼容 7-Zip / WinRAR / Bandizip 的加密格式，免费开源。
+
+## 🚀 v0.5.0 全面升级
+
+- **明暗主题切换** — 顶栏一键切换 ☀️ 浅色 / 🌙 深色主题
+- **安全删除源文件** — 压缩/加密后可选安全删除源文件（3 次覆写 + 删除）
+- **归档内容浏览** — GUI 浮动窗口查看归档内文件列表、大小、压缩比
+- **完整性测试** — 一键检测归档是否损坏（支持 zip/7z/rar/tar 系列/单文件流）
+- **任务取消** — 工作中可随时取消，协作式取消机制
+- **进度详情** — 实时显示已处理/总字节数
+- **密码生成器** — 🎲 一键生成强密码（大小写+数字+符号混合）
+- **密码可见性切换** — 👁/🙈 显示/隐藏密码
+- **Toast 通知** — 操作完成/失败顶部弹出通知
+- **最近文件** — 下拉菜单快速选择最近使用过的文件
+- **拖放支持** — 直接拖文件到窗口打开
+- **键盘快捷键** — Ctrl+Enter 开始 / Esc 取消 / Ctrl+L 清空日志
+- **文件排除规则** — 通配符排除（`*.tmp, *.log, .git`）
+- **分卷压缩** — 支持 K/M/G/B 后缀（`100M, 1G, 700K, 512B`）
+- **🐛 修复 7z 单文件压缩** — 修复 `push_source_path` 对单文件生成空条目名导致解压失败的问题
 
 ## 🚀 v0.4.0 性能优化
 
@@ -47,12 +65,21 @@ smart_ex 是一个用 Rust 编写的跨平台压缩/解压/加密工具，支持
 
 ### 🎨 GUI 特性
 
-- 深色玻璃拟态主题
+- 深色玻璃拟态 / 浅色主题一键切换 (☀️/🌙)
 - 中英双语实时切换
 - 压缩 / 解压 / 加密 / 解密 四大模式
 - 解压到当前文件夹 / 解压另存为 快捷操作
-- 实时进度条 + 日志面板
-- 拖拽文件选择
+- 归档内容浏览 (浮动窗口, 文件列表 + 压缩比统计)
+- 完整性测试 (一键检测归档是否损坏)
+- 实时进度条 + 字节详情 + 日志面板
+- 任务取消 (协作式取消机制)
+- 密码生成器 (🎲 强密码) + 密码可见性切换 (👁/🙈)
+- Toast 通知 (操作完成/失败提示)
+- 最近文件下拉菜单
+- 拖放文件支持
+- 键盘快捷键 (Ctrl+Enter / Esc / Ctrl+L)
+- 文件排除规则 + 分卷压缩
+- 安全删除源文件 (3 次覆写)
 - 智能输出路径自动匹配
 
 ### 🖱️ 系统集成
@@ -69,9 +96,9 @@ smart_ex 是一个用 Rust 编写的跨平台压缩/解压/加密工具，支持
 
 | 平台 | 安装包 | 安装方式 |
 |------|--------|----------|
-| macOS | `smart_ex-0.4.0.pkg` | 双击安装，或 `sudo installer -pkg smart_ex-0.4.0.pkg -target /` |
-| Linux | `smart_ex_0.4.0_amd64.deb` | `sudo dpkg -i smart_ex_0.4.0_amd64.deb` |
-| Windows | `smart_ex-0.4.0-windows-x64-setup.exe` | 双击运行安装向导 |
+| macOS | `smart_ex-0.5.0.pkg` | 双击安装，或 `sudo installer -pkg smart_ex-0.5.0.pkg -target /` |
+| Linux | `smart_ex_0.5.0_amd64.deb` | `sudo dpkg -i smart_ex_0.5.0_amd64.deb` |
+| Windows | `smart_ex-0.5.0-windows-x64-setup.exe` | 双击运行安装向导 |
 
 #### Windows 安装选项
 
@@ -135,11 +162,23 @@ smart_ex compress -i ./my_folder -o archive.tar.zst -f tar.zst -l 3
 # 压缩 + 加密 (ZIP AES-256, 兼容 7-Zip/WinRAR)
 smart_ex compress -i ./my_folder -o secret.zip -f zip -l 3 --password MyPass123
 
+# 压缩 + 排除文件 (通配符, 可多次指定)
+smart_ex compress -i ./project -o project.zip -f zip --exclude "*.tmp" --exclude "*.log" --exclude ".git"
+
+# 压缩 + 分卷 (支持 K/M/G/B 后缀)
+smart_ex compress -i ./large_file -o archive.zip -f zip --split 100M
+
 # 解压
 smart_ex decompress -i archive.tar.zst -o ./output
 
 # 解压加密归档
 smart_ex decompress -i secret.zip -o ./output --password MyPass123
+
+# 浏览归档内容 (不解压)
+smart_ex list -i archive.zip
+
+# 测试归档完整性
+smart_ex test -i archive.zip
 
 # 解压到当前文件夹 (右键菜单)
 smart_ex extract-here -i archive.zip
@@ -207,7 +246,7 @@ sudo apt remove smart_ex
 ```bash
 cargo build --release
 ./installer/build_pkg.sh
-# 生成: dist/smart_ex-0.4.0.pkg
+# 生成: dist/smart_ex-0.5.0.pkg
 ```
 
 ### Linux .deb
@@ -215,7 +254,7 @@ cargo build --release
 ```bash
 cargo build --release
 ./installer/build_deb.sh amd64    # 或 arm64
-# 生成: dist/deb-build/smart_ex_0.4.0_amd64.deb
+# 生成: dist/deb-build/smart_ex_0.5.0_amd64.deb
 ```
 
 ### Windows .exe (Inno Setup)
@@ -224,7 +263,7 @@ cargo build --release
 cargo build --release
 # 需安装 Inno Setup: https://jrsoftware.org/isdl.php
 iscc installer\smart_ex.iss
-# 生成: installer\output\smart_ex-0.4.0-windows-x64-setup.exe
+# 生成: installer\output\smart_ex-0.5.0-windows-x64-setup.exe
 ```
 
 ## 📁 项目结构
@@ -232,15 +271,16 @@ iscc installer\smart_ex.iss
 ```
 smart_ex/
 ├── src/
-│   ├── main.rs          # 入口 + 命令分发
+│   ├── main.rs          # 入口 + 命令分发 (compress/decompress/list/test/encrypt/decrypt)
 │   ├── cli.rs           # CLI 参数定义 (clap)
-│   ├── compress.rs      # 压缩逻辑 (zip/7z/tar.*/单文件)
-│   ├── decompress.rs    # 解压逻辑 (含编码修复)
+│   ├── compress.rs      # 压缩逻辑 (zip/7z/tar.*/单文件 + 排除 + 分卷)
+│   ├── decompress.rs    # 解压逻辑 (含编码修复 + 炸弹检测 + 完整性测试)
 │   ├── crypto.rs        # AES-256-GCM 加密/解密
 │   ├── format.rs        # 格式检测与容器定义
-│   ├── gui.rs           # eframe/egui GUI
+│   ├── gui.rs           # eframe/egui GUI (主题切换 + 安全删除 + 归档浏览)
 │   ├── i18n.rs          # 中英双语国际化
-│   ├── progress.rs      # 进度条
+│   ├── archive_list.rs  # 归档内容浏览
+│   ├── progress.rs      # 进度条 (4 参数回调)
 │   └── rar.rs           # RAR 解压
 ├── installer/
 │   ├── smart_ex.iss     # Windows Inno Setup 脚本
@@ -271,6 +311,8 @@ smart_ex/
 - 加密 ZIP (AES-256) / 加密 7z (AES-256) / .enc (AES-256-GCM)
 - tar.zst + .enc 包装
 - extract-here / extract-as
+- 归档列表 (list) / 完整性测试 (test)
+- 文件排除规则 / 分卷压缩
 
 ## 🔧 技术栈
 
@@ -339,6 +381,26 @@ smart_ex 使用 Zstandard 作为默认压缩算法，在速度和压缩比上远
 > zstd 多线程编码 + 1MB 大缓冲区 + ZIP 并行解压 + 压缩包炸弹检测
 
 ## 🔄 版本历史
+
+### v0.5.0
+- 🎨 明暗主题切换 (☀️ 浅色 / 🌙 深色)
+- 🗑️ 安全删除源文件 (3 次覆写: 0xFF / 0x00 / 随机)
+- 📋 归档内容浏览 (GUI 浮动窗口, 文件列表 + 压缩比统计)
+- 🧪 完整性测试 (CLI `test` 命令 + GUI 按钮, 支持 zip/7z/rar/tar/单文件流)
+- 📋 归档列表 (CLI `list` 命令, 表格输出)
+- ✕ 任务取消 (协作式取消, Arc<AtomicBool>)
+- 📊 进度详情 (已处理/总字节数实时显示)
+- 🎲 密码生成器 (xorshift64 PRNG, 混合字符池)
+- 👁 密码可见性切换
+- 💬 Toast 通知 (3 秒自动消失, 颜色编码)
+- 📂 最近文件下拉菜单
+- 🖱️ 拖放文件支持
+- ⌨️ 键盘快捷键 (Ctrl+Enter / Esc / Ctrl+L)
+- 📝 文件排除规则 (通配符, GUI + CLI)
+- ✂️ 分卷压缩 (支持 B/K/M/G 后缀, GUI + CLI)
+- 🐛 修复 7z 单文件压缩 (push_source_path 空条目名导致解压失败)
+- 🐛 修复 7z 解压需预创建输出目录
+- 🔧 i18n 补全所有新功能翻译键
 
 ### v0.4.0
 - ⚡ zstd 多线程编码 (利用全部 CPU 核心并行压缩)
