@@ -1,0 +1,319 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>smart_ex</string>
+    <key>CFBundleDisplayName</key>
+    <string>SmartEx</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.smartex.app</string>
+    <key>CFBundleVersion</key>
+    <string>0.3.0</string>
+    <key>CFBundleShortVersionString</key>
+    <string>0.3.0</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleExecutable</key>
+    <string>smart_ex</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>10.15</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>LSUIElement</key>
+    <false/>
+
+    <!-- macOS 隐私权限说明 (访问 Downloads/Desktop/Documents 需要) -->
+    <key>NSDownloadsFolderUsageDescription</key>
+    <string>smart_ex 需要访问下载文件夹以压缩/解压文件</string>
+    <key>NSDesktopFolderUsageDescription</key>
+    <string>smart_ex 需要访问桌面以压缩/解压文件</string>
+    <key>NSDocumentsFolderUsageDescription</key>
+    <string>smart_ex 需要访问文稿文件夹以压缩/解压文件</string>
+    <key>NSPhotoLibraryUsageDescription</key>
+    <string>smart_ex 需要访问照片库以压缩图片</string>
+
+    <!-- 文件关联: 所有支持的压缩格式 -->
+    <key>CFBundleDocumentTypes</key>
+    <array>
+        <!-- ZIP -->
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>ZIP Archive</string>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>LSHandlerRank</key>
+            <string>Default</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>public.zip-archive</string>
+                <string>com.pkware.zip-archive</string>
+            </array>
+            <key>CFBundleTypeExtensions</key>
+            <array>
+                <string>zip</string>
+            </array>
+        </dict>
+        <!-- 7z -->
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>7-Zip Archive</string>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>LSHandlerRank</key>
+            <string>Default</string>
+            <key>CFBundleTypeExtensions</key>
+            <array>
+                <string>7z</string>
+            </array>
+        </dict>
+        <!-- RAR -->
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>RAR Archive</string>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>LSHandlerRank</key>
+            <string>Default</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>com.rarlab.rar-archive</string>
+            </array>
+            <key>CFBundleTypeExtensions</key>
+            <array>
+                <string>rar</string>
+                <string>r00</string>
+            </array>
+        </dict>
+        <!-- TAR -->
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>TAR Archive</string>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>LSHandlerRank</key>
+            <string>Default</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>public.tar-archive</string>
+            </array>
+            <key>CFBundleTypeExtensions</key>
+            <array>
+                <string>tar</string>
+            </array>
+        </dict>
+        <!-- TAR.GZ / TGZ -->
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Gzip Compressed TAR</string>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>LSHandlerRank</key>
+            <string>Default</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>org.gnu.gnu-zip-tar-archive</string>
+            </array>
+            <key>CFBundleTypeExtensions</key>
+            <array>
+                <string>tar.gz</string>
+                <string>tgz</string>
+            </array>
+        </dict>
+        <!-- TAR.XZ / TXZ -->
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>LZMA Compressed TAR</string>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>LSHandlerRank</key>
+            <string>Default</string>
+            <key>CFBundleTypeExtensions</key>
+            <array>
+                <string>tar.xz</string>
+                <string>txz</string>
+            </array>
+        </dict>
+        <!-- TAR.ZST / TZST -->
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Zstandard Compressed TAR</string>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>LSHandlerRank</key>
+            <string>Default</string>
+            <key>CFBundleTypeExtensions</key>
+            <array>
+                <string>tar.zst</string>
+                <string>tzst</string>
+            </array>
+        </dict>
+        <!-- TAR.BZ2 / TBZ2 -->
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>BZip2 Compressed TAR</string>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>LSHandlerRank</key>
+            <string>Default</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>public.bzip2-archive</string>
+            </array>
+            <key>CFBundleTypeExtensions</key>
+            <array>
+                <string>tar.bz2</string>
+                <string>tbz2</string>
+            </array>
+        </dict>
+        <!-- TAR.LZ4 -->
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>LZ4 Compressed TAR</string>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>LSHandlerRank</key>
+            <string>Default</string>
+            <key>CFBundleTypeExtensions</key>
+            <array>
+                <string>tar.lz4</string>
+            </array>
+        </dict>
+        <!-- GZ -->
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Gzip File</string>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>LSHandlerRank</key>
+            <string>Default</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>org.gnu.gnu-zip-archive</string>
+            </array>
+            <key>CFBundleTypeExtensions</key>
+            <array>
+                <string>gz</string>
+            </array>
+        </dict>
+        <!-- XZ -->
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>LZMA File</string>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>LSHandlerRank</key>
+            <string>Default</string>
+            <key>CFBundleTypeExtensions</key>
+            <array>
+                <string>xz</string>
+            </array>
+        </dict>
+        <!-- ZST -->
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Zstandard File</string>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>LSHandlerRank</key>
+            <string>Default</string>
+            <key>CFBundleTypeExtensions</key>
+            <array>
+                <string>zst</string>
+            </array>
+        </dict>
+        <!-- BZ2 -->
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>BZip2 File</string>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>LSHandlerRank</key>
+            <string>Default</string>
+            <key>CFBundleTypeExtensions</key>
+            <array>
+                <string>bz2</string>
+            </array>
+        </dict>
+        <!-- LZ4 -->
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>LZ4 File</string>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>LSHandlerRank</key>
+            <string>Default</string>
+            <key>CFBundleTypeExtensions</key>
+            <array>
+                <string>lz4</string>
+            </array>
+        </dict>
+        <!-- ENC (smart_ex 加密归档) -->
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>SmartEx Encrypted Archive</string>
+            <key>CFBundleTypeRole</key>
+            <string>Viewer</string>
+            <key>LSHandlerRank</key>
+            <string>Default</string>
+            <key>CFBundleTypeExtensions</key>
+            <array>
+                <string>enc</string>
+            </array>
+        </dict>
+    </array>
+
+    <!-- 服务菜单: 右键 "用 smart_ex 解压" -->
+    <key>NSServices</key>
+    <array>
+        <dict>
+            <key>NSMenuItem</key>
+            <dict>
+                <key>default</key>
+                <string>用 smart_ex 解压到当前文件夹</string>
+            </dict>
+            <key>NSMessage</key>
+            <string>extractHere</string>
+            <key>NSPortName</key>
+            <string>smart_ex</string>
+            <key>NSSendFileTypes</key>
+            <array>
+                <string>public.zip-archive</string>
+                <string>public.tar-archive</string>
+                <string>org.gnu.gnu-zip-tar-archive</string>
+                <string>org.gnu.gnu-zip-archive</string>
+                <string>public.bzip2-archive</string>
+            </array>
+            <key>NSSendTypes</key>
+            <array>
+                <string>public.file-url</string>
+            </array>
+        </dict>
+        <dict>
+            <key>NSMenuItem</key>
+            <dict>
+                <key>default</key>
+                <string>用 smart_ex 解压另存为...</string>
+            </dict>
+            <key>NSMessage</key>
+            <string>extractAs</string>
+            <key>NSPortName</key>
+            <string>smart_ex</string>
+            <key>NSSendFileTypes</key>
+            <array>
+                <string>public.zip-archive</string>
+                <string>public.tar-archive</string>
+                <string>org.gnu.gnu-zip-tar-archive</string>
+                <string>org.gnu.gnu-zip-archive</string>
+                <string>public.bzip2-archive</string>
+            </array>
+            <key>NSSendTypes</key>
+            <array>
+                <string>public.file-url</string>
+            </array>
+        </dict>
+    </array>
+</dict>
+</plist>

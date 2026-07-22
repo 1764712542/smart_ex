@@ -1,0 +1,31 @@
+[Desktop Entry]
+Type=Application
+Name=SmartEx
+GenericName=Smart Compression Tool
+GenericName[zh_CN]=智能压缩解压工具
+Comment=Compress, decompress, encrypt and decrypt 14+ archive formats
+Comment[zh_CN]=压缩、解压、加密、解密 14+ 种归档格式
+Exec=smart_ex gui %f
+Icon=smart_ex
+Terminal=false
+Categories=Utility;Archiving;Compression;System;
+Keywords=zip;7z;rar;tar;gzip;bzip2;xz;zstd;lz4;compress;extract;archive;encrypt;
+Keywords[zh_CN]=压缩;解压;加密;归档;zip;7z;rar;tar;
+
+# 文件关联: 所有支持的压缩格式
+MimeType=application/zip;application/x-7z-compressed;application/x-rar;application/x-tar;application/x-compressed-tar;application/x-xz-compressed-tar;application/x-zstd-compressed-tar;application/x-bzip-compressed-tar;application/x-lz4-compressed-tar;application/gzip;application/x-xz;application/x-zstd;application/x-bzip2;application/x-lz4;application/x-smartex-encrypted;
+
+# 操作 (Actions): 右键菜单 "解压到当前文件夹" 和 "解压另存为..."
+Actions=extractHere;extractAs;
+
+[Desktop Action extractHere]
+Name=Extract Here
+Name[zh_CN]=解压到当前文件夹
+Exec=smart_ex extract-here -i %f
+Icon=smart_ex
+
+[Desktop Action extractAs]
+Name=Extract As...
+Name[zh_CN]=解压另存为...
+Exec=smart_ex extract-as -i %f
+Icon=smart_ex

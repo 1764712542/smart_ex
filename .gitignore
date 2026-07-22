@@ -1,0 +1,26 @@
+# Rust
+/target/
+**/*.rs.bk
+Cargo.lock
+# 本地 cargo 镜像配置 (每个开发者应自行配置)
+/.cargo/
+
+# Build artifacts
+/dist/
+/installer/output/
+
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Temporary
+*.tmp
+*.bak
