@@ -31,6 +31,7 @@
         ? formatBytes(bytesDone)
         : ''
   );
+  let isComplete = $derived(percentage >= 100);
 </script>
 
 <div class="flex flex-col gap-1.5">
@@ -54,7 +55,7 @@
       ></div>
     {:else}
       <div
-        class="absolute h-full rounded-full bg-accent transition-all duration-300 ease-out"
+        class="absolute h-full rounded-full transition-all duration-300 ease-out {isComplete ? 'bg-success' : 'bg-accent'}"
         style="width: {percentage}%; left: 0;"
       ></div>
     {/if}
