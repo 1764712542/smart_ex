@@ -14,7 +14,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-VERSION="0.3.0"
+VERSION="0.5.0"
 BUILD_DIR="$PROJECT_DIR/dist/pkg-build"
 PAYLOAD_DIR="$BUILD_DIR/payload"
 
