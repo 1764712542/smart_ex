@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Settings, Sun, Moon } from 'lucide-svelte';
+  import { Settings, Sun, Moon, Workflow } from 'lucide-svelte';
   import type { ComponentType } from 'svelte';
   import IconButton from './IconButton.svelte';
 
@@ -8,6 +8,7 @@
     theme?: 'dark' | 'light';
     onToggleTheme?: () => void;
     onOpenSettings?: () => void;
+    onOpenWorkflowEditor?: () => void;
   }
 
   let {
@@ -15,6 +16,7 @@
     theme = 'dark',
     onToggleTheme,
     onOpenSettings,
+    onOpenWorkflowEditor,
   }: Props = $props();
 
   let ThemeIcon = $derived(
@@ -40,6 +42,7 @@
 
   <!-- Right: Actions -->
   <div class="flex items-center gap-1 w-24 justify-end">
+    <IconButton icon={Workflow} label="工作流编排器" onclick={onOpenWorkflowEditor} size={16} />
     <IconButton icon={ThemeIcon} label="Toggle theme" onclick={onToggleTheme} size={16} />
     <IconButton icon={Settings} label="Settings" onclick={onOpenSettings} size={16} />
   </div>

@@ -23,6 +23,8 @@
     CircleX,
     TriangleAlert,
     Info,
+    Workflow,
+    Play,
   } from 'lucide-svelte';
   import type { ComponentType } from 'svelte';
   import TitleBar from '$lib/components/TitleBar.svelte';
@@ -31,6 +33,8 @@
   import ProgressBar from '$lib/components/ProgressBar.svelte';
   import Toast from '$lib/components/Toast.svelte';
   import ContextWizard from '$lib/components/ContextWizard.svelte';
+  import SettingsPanel from '$lib/components/SettingsPanel.svelte';
+  import WorkflowEditor from '$lib/components/WorkflowEditor.svelte';
   import { api } from '$lib/tauri';
   import {
     appState,
@@ -57,6 +61,19 @@
     type Mode,
     type LogEntry,
   } from '$lib/stores/app.svelte';
+  import {
+    settings,
+    settingsUI,
+    openSettings,
+    applyAllAppearance,
+    initSystemThemeListener,
+    matchShortcut,
+  } from '$lib/stores/settings.svelte';
+  import {
+    workflowsState,
+    openWorkflowEditor,
+    runWorkflowFromMain,
+  } from '$lib/stores/workflows.svelte';
   import { startDragDrop } from '$lib/stores/dragdrop.svelte';
   import { startProgressListener } from '$lib/stores/progress.svelte';
 
@@ -96,6 +113,46 @@
 
   let lvlRange = $derived(levelRange());
   let canExecute = $derived(canStart());
+
+  // ===== L2: 模式过滤 (关闭的模式从 tabs 消失) =====
+  let visibleModes = $derived(
+    modes.filter((m) => settings.enabledModes[m.id]),
+  );
+
+  // 确保当前模式始终启用, 否则切到第一个启用模式
+  $effect(() => {
+    if (!settings.enabledModes[appState.mode] && visibleModes.length > 0) {
+      setMode(visibleModes[0].id);
+    }
+  });
+
+  // ===== L1: 布局派生 =====
+  let layoutClass = $derived(
+    settings.layout === 'left-right'
+      ? 'flex flex-row'
+      : settings.layout === 'right-left'
+        ? 'flex flex-row-reverse'
+        : 'flex flex-col',
+  );
+  let paramPanelClass = $derived(
+    settings.layout === 'top-bottom' ? 'w-full' : 'w-[380px] flex-shrink-0',
+  );
+  let logPanelClass = $derived(
+    settings.layout === 'top-bottom' ? 'w-full' : 'flex-1 min-w-0',
+  );
+
+  // ===== L2: 功能开关派生 =====
+  let showContextWizardBtn = $derived(settings.enabledFeatures.contextWizard);
+  let showKeychain = $derived(settings.enabledFeatures.keychain);
+  let showSplitSize = $derived(settings.enabledFeatures.splitSize);
+  let showExclude = $derived(settings.enabledFeatures.exclude);
+
+  // ===== L3: 已保存工作流 =====
+  let savedWorkflows = $derived(workflowsState.workflows);
+
+  async function onRunWorkflow(id: string): Promise<void> {
+    await runWorkflowFromMain(id);
+  }
 
   // ===== 钥匙串菜单 =====
   let keychainMenuOpen = $state(false);
@@ -207,9 +264,14 @@
     }
   }
 
-  // ===== 初始化: 主题 / 拖放 / 进度 =====
+  // ===== 初始化: 主题 / 拖放 / 进度 / 自定义系统 =====
   $effect(() => {
     initTheme();
+    // L1: 应用自定义外观 (主题色 / 字体 / 主题)
+    applyAllAppearance();
+    let stopSystemTheme = initSystemThemeListener();
+    // L1: 全局快捷键
+    window.addEventListener('keydown', onGlobalKeydown);
     window.addEventListener('click', onWindowClick);
     let stopDrag: (() => void) | null = null;
     let stopProgress: (() => void) | null = null;
@@ -227,10 +289,21 @@
     });
     return () => {
       cancelled = true;
+      window.removeEventListener('keydown', onGlobalKeydown);
       window.removeEventListener('click', onWindowClick);
+      stopSystemTheme();
       stopDrag?.();
       stopProgress?.();
     };
+  });
+
+  // L1: 主题/字体变化时重新应用
+  $effect(() => {
+    void settings.theme;
+    void settings.accentColor;
+    void settings.fontFamily;
+    void settings.fontSize;
+    applyAllAppearance();
   });
 
   // ===== 拖放遮罩 =====
@@ -260,7 +333,42 @@
   }
 
   function onOpenSettings(): void {
-    showToast('设置面板 (即将推出)', 'info');
+    openSettings();
+  }
+
+  function onOpenWorkflowEditor(): void {
+    openWorkflowEditor();
+  }
+
+  // ===== L1: 全局快捷键 =====
+  function onGlobalKeydown(e: KeyboardEvent): void {
+    // 设置面板打开时不触发全局快捷键 (避免与快捷键录制冲突)
+    if (settingsUI.open) return;
+    // 工作流编辑器打开时也不触发
+    if (workflowsState.editorOpen) return;
+    // 开始执行
+    if (matchShortcut(settings.shortcuts.start, e)) {
+      e.preventDefault();
+      if (canStart() && !appState.working) {
+        void startTask();
+      }
+      return;
+    }
+    // 取消
+    if (matchShortcut(settings.shortcuts.cancel, e)) {
+      if (appState.working) {
+        e.preventDefault();
+        pushLog('取消请求已发送 (后端将在下一个检查点停止)', 'warn');
+        showToast('已请求取消', 'warn');
+      }
+      return;
+    }
+    // 清日志
+    if (matchShortcut(settings.shortcuts.clearLogs, e)) {
+      e.preventDefault();
+      clearLogs();
+      return;
+    }
   }
 
   // ===== 拖放区域支持 (HTML5 拖放作为 Tauri 事件的后备) =====
@@ -293,6 +401,7 @@
     theme={appState.theme}
     onToggleTheme={onToggleTheme}
     onOpenSettings={onOpenSettings}
+    onOpenWorkflowEditor={onOpenWorkflowEditor}
   />
 
   <!-- Brand + Mode Tabs -->
@@ -306,7 +415,7 @@
       <span class="font-bold text-base tracking-tight">SmartEx</span>
     </div>
     <div class="flex items-center gap-0.5 bg-bg-hover/60 rounded-mac p-0.5">
-      {#each modes as m (m.id)}
+      {#each visibleModes as m (m.id)}
         {@const Icon = m.icon}
         <button
           onclick={() => setMode(m.id)}
@@ -322,17 +431,37 @@
         </button>
       {/each}
     </div>
+
+    <!-- L3: 已保存工作流按钮 -->
+    {#if savedWorkflows.length > 0}
+      <div class="flex items-center gap-1 ml-auto">
+        <Workflow size={14} class="text-text-dim" />
+        {#each savedWorkflows.slice(0, 4) as wf (wf.id)}
+          <button
+            onclick={() => onRunWorkflow(wf.id)}
+            disabled={appState.working}
+            title={wf.name}
+            class="flex items-center gap-1 px-2 py-1 rounded-mac-sm text-xs font-medium transition-all {appState.working
+              ? 'opacity-50 cursor-not-allowed text-text-dim'
+              : 'text-text-dim hover:text-accent hover:bg-bg-hover cursor-pointer'}"
+          >
+            <Play size={11} />
+            {wf.name}
+          </button>
+        {/each}
+      </div>
+    {/if}
   </div>
 
   <!-- Main Content -->
   <div
-    class="flex flex-1 gap-4 p-4 overflow-hidden min-h-0"
+    class="{layoutClass} flex-1 gap-4 p-4 overflow-hidden min-h-0"
     role="main"
     ondragover={onDragOver}
     ondrop={onDrop}
   >
     <!-- Left: Parameters -->
-    <div class="w-[380px] flex flex-col gap-4 overflow-y-auto flex-shrink-0 pr-1">
+    <div class="{paramPanelClass} flex flex-col gap-4 overflow-y-auto pr-1">
       <!-- 输入输出 -->
       <Panel title="输入 / 输出">
         <div class="flex flex-col gap-3">
@@ -427,6 +556,7 @@
             </div>
 
             <!-- 排除规则 -->
+            {#if showExclude}
             <div>
               <label for="exclude-input" class="text-sm font-medium text-text-dim mb-1.5 block">
                 排除规则
@@ -440,8 +570,10 @@
                 class="w-full px-3 py-2 rounded-mac-sm bg-bg-hover border border-border text-text placeholder:text-text-dim/60 focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/30 transition-all text-sm font-mono"
               />
             </div>
+            {/if}
 
             <!-- 分卷大小 -->
+            {#if showSplitSize}
             <div>
               <label for="split-input" class="text-sm font-medium text-text-dim mb-1.5 block">
                 分卷大小
@@ -455,8 +587,10 @@
                 class="w-full px-3 py-2 rounded-mac-sm bg-bg-hover border border-border text-text placeholder:text-text-dim/60 focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/30 transition-all text-sm font-mono"
               />
             </div>
+            {/if}
 
             <!-- 智能推荐按钮 -->
+            {#if showContextWizardBtn}
             <button
               onclick={() => openContextWizard()}
               disabled={appState.working}
@@ -467,6 +601,7 @@
               <Sparkles size={16} />
               智能推荐格式
             </button>
+            {/if}
           {/if}
 
           <!-- 密码 (压缩/解压可选, 加密/解密必填) -->
@@ -480,6 +615,7 @@
                   {/if}
                 </span>
                 <!-- 钥匙串菜单 -->
+                {#if showKeychain}
                 <div class="relative" bind:this={keychainContainer}>
                   <button
                     onclick={toggleKeychainMenu}
@@ -520,6 +656,7 @@
                     </div>
                   {/if}
                 </div>
+                {/if}
               </label>
               <div class="relative">
                 <input
@@ -579,7 +716,7 @@
     </div>
 
     <!-- Right: Progress + Log -->
-    <div class="flex-1 flex flex-col gap-4 overflow-hidden min-w-0">
+    <div class="{logPanelClass} flex flex-col gap-4 overflow-hidden">
       <Panel title="进度">
         <ProgressBar
           progress={appState.progress}
@@ -685,4 +822,10 @@
 
   <!-- 智能推荐向导 -->
   <ContextWizard />
+
+  <!-- L1+L2: 设置面板 -->
+  <SettingsPanel />
+
+  <!-- L3: 工作流编辑器 -->
+  <WorkflowEditor />
 </div>
