@@ -140,17 +140,17 @@ export const LAYOUT_OPTIONS: { value: Layout; label: string; desc: string }[] = 
 // 默认背景配置
 export function defaultBackground(): BackgroundSettings {
   return {
-    type: 'solid',
+    type: 'gradient',
     solidColor: '',
-    gradientFrom: '#0a84ff',
-    gradientTo: '#bf5af2',
+    gradientFrom: '#1c1c1e',
+    gradientTo: '#2c2c2e',
     gradientAngle: 135,
     imagePath: '',
     imageOpacity: 0.6,
     imageBlur: 0,
     animatedColors: ['#0a84ff', '#bf5af2', '#30d158'],
     animatedSpeed: 20,
-    vignette: false,
+    vignette: true,
   };
 }
 
@@ -264,8 +264,8 @@ export function defaultSettings(): Settings {
     layout: 'left-right',
     shortcuts: { ...DEFAULT_SHORTCUTS },
     background: defaultBackground(),
-    panelOpacity: 0.8,
-    blurStrength: 20,
+    panelOpacity: 0.75,
+    blurStrength: 24,
     motion: defaultMotion(),
 
     enabledModes: {

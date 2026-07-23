@@ -467,7 +467,7 @@
   }
 </script>
 
-<div class="flex flex-col h-screen bg-bg text-text relative">
+<div class="flex flex-col h-screen text-text relative">
   <BackgroundLayer />
   <!-- Title Bar -->
   <TitleBar
@@ -891,7 +891,7 @@
           bytesDone={appState.bytesDone}
           bytesTotal={appState.bytesTotal}
           indeterminate={appState.working && appState.progress === 0}
-          message={appState.working ? appState.statusText : appState.progress >= 100 ? '完成' : '空闲'}
+          message={appState.working ? appState.statusText : appState.progress >= 1 ? '完成' : '空闲'}
         />
         {#if appState.working}
           <div class="mt-3 flex justify-end">

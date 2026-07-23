@@ -212,6 +212,16 @@ fn buf_reader(path: &Path) -> Result<BufReader<File>> {
     Ok(BufReader::with_capacity(BUF_SIZE, File::open(path)?))
 }
 
+/// 计算文件列表的总字节数 (仅文件, 不含目录)
+fn total_bytes_of(entries: &[PathBuf]) -> u64 {
+    entries
+        .iter()
+        .filter_map(|e| e.metadata().ok())
+        .filter(|m| m.is_file())
+        .map(|m| m.len())
+        .sum()
+}
+
 /// 获取可用 CPU 核心数 (用于多线程压缩)
 fn num_cpus() -> u32 {
     std::thread::available_parallelism()
@@ -248,6 +258,7 @@ pub fn zip_compress(
 
     let entries = collect_entries(input)?;
     bar.set_total(entries.len() as u64);
+    bar.set_bytes_total(total_bytes_of(&entries));
     let base = base_dir(input);
 
     for entry in entries {
@@ -257,6 +268,9 @@ pub fn zip_compress(
             zip.add_directory(format!("{}/", name), options)?;
         } else {
             zip.start_file(&name, options)?;
+            if let Ok(meta) = entry.metadata() {
+                bar.inc_bytes(meta.len());
+            }
             // 使用大缓冲区读取文件, 加速 IO
             let mut f = buf_reader(&entry)?;
             io::copy(&mut f, &mut zip)?;
@@ -278,8 +292,7 @@ pub fn sevenz_compress(
 ) -> Result<()> {
     let entries = collect_files(input)?;
     bar.set_total(entries.len() as u64);
-
-    // 将 smart_ex 的 level (0-12) 映射到 LZMA2 preset (0-9)
+    bar.set_bytes_total(total_bytes_of(&entries));
     let preset = level.clamp(0, 9) as u32;
 
     let mut sz = sevenz_rust::SevenZWriter::create(output)
@@ -334,6 +347,7 @@ where
     let mut tar = tar::Builder::new(encoder);
     let entries = collect_entries(input)?;
     bar.set_total(entries.len() as u64);
+    bar.set_bytes_total(total_bytes_of(&entries));
     let base = base_dir(input);
 
     for entry in entries {
@@ -342,6 +356,9 @@ where
             tar.append_dir(relative, &entry)?;
         } else {
             let mut f = File::open(&entry)?;
+            if let Ok(meta) = entry.metadata() {
+                bar.inc_bytes(meta.len());
+            }
             tar.append_file(relative, &mut f)?;
         }
         bar.inc(1);
@@ -408,6 +425,7 @@ pub fn tarlz4_compress(input: &Path, output: &Path, level: i32, _pwd: Option<&st
         let mut tar = tar::Builder::new(&mut enc);
         let entries = collect_entries(input)?;
         bar.set_total(entries.len() as u64);
+        bar.set_bytes_total(total_bytes_of(&entries));
         let base = base_dir(input);
         for entry in entries {
             let relative = entry.strip_prefix(base).unwrap_or(&entry);
@@ -415,6 +433,9 @@ pub fn tarlz4_compress(input: &Path, output: &Path, level: i32, _pwd: Option<&st
                 tar.append_dir(relative, &entry)?;
             } else {
                 let mut f = File::open(&entry)?;
+                if let Ok(meta) = entry.metadata() {
+                    bar.inc_bytes(meta.len());
+                }
                 tar.append_file(relative, &mut f)?;
             }
             bar.inc(1);
@@ -574,6 +595,7 @@ fn zip_compress_ex(input: &Path, output: &Path, level: i32, password: Option<&st
     }
     let entries = collect_entries_with_exclude(input, excludes)?;
     bar.set_total(entries.len() as u64);
+    bar.set_bytes_total(total_bytes_of(&entries));
     let base = base_dir(input);
     for entry in entries {
         let relative = entry.strip_prefix(base).unwrap_or(&entry);
@@ -582,6 +604,9 @@ fn zip_compress_ex(input: &Path, output: &Path, level: i32, password: Option<&st
             zip.add_directory(format!("{}/", name), options)?;
         } else {
             zip.start_file(&name, options)?;
+            if let Ok(meta) = entry.metadata() {
+                bar.inc_bytes(meta.len());
+            }
             let mut f = buf_reader(&entry)?;
             io::copy(&mut f, &mut zip)?;
         }
@@ -672,6 +697,7 @@ fn tarlz4_compress_ex(input: &Path, output: &Path, level: i32, _pwd: Option<&str
         let mut tar = tar::Builder::new(&mut enc);
         let entries = collect_entries_with_exclude(input, excludes)?;
         bar.set_total(entries.len() as u64);
+        bar.set_bytes_total(total_bytes_of(&entries));
         let base = base_dir(input);
         for entry in entries {
             let relative = entry.strip_prefix(base).unwrap_or(&entry);
@@ -679,6 +705,9 @@ fn tarlz4_compress_ex(input: &Path, output: &Path, level: i32, _pwd: Option<&str
                 tar.append_dir(relative, &entry)?;
             } else {
                 let mut fr = File::open(&entry)?;
+                if let Ok(meta) = entry.metadata() {
+                    bar.inc_bytes(meta.len());
+                }
                 tar.append_file(relative, &mut fr)?;
             }
             bar.inc(1);
@@ -696,6 +725,7 @@ where W: Write + Send,
     let mut tar = tar::Builder::new(encoder);
     let entries = collect_entries_with_exclude(input, excludes)?;
     bar.set_total(entries.len() as u64);
+    bar.set_bytes_total(total_bytes_of(&entries));
     let base = base_dir(input);
     for entry in entries {
         let relative = entry.strip_prefix(base).unwrap_or(&entry);
@@ -703,6 +733,9 @@ where W: Write + Send,
             tar.append_dir(relative, &entry)?;
         } else {
             let mut f = File::open(&entry)?;
+            if let Ok(meta) = entry.metadata() {
+                bar.inc_bytes(meta.len());
+            }
             tar.append_file(relative, &mut f)?;
         }
         bar.inc(1);

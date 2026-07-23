@@ -36,7 +36,8 @@ html, body {
   margin: 0;
   font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Inter', system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
-  background: var(--bg);
+  /* body 必须透明, 否则会遮蔽 z-index:-1 的 .bg-layer (渐变/图片/动态背景) */
+  background: transparent;
   color: var(--text);
   overflow: hidden;
   user-select: none;
@@ -111,6 +112,8 @@ select {
 @layer components {
   /* 玻璃拟态面板 — 透明度/模糊由用户设置驱动 */
   .glass {
+    position: relative;
+    z-index: 0;
     background: color-mix(in srgb, var(--bg-panel) var(--panel-opacity, 0.8), transparent);
     backdrop-filter: blur(var(--blur-strength, 20px)) saturate(180%);
     -webkit-backdrop-filter: blur(var(--blur-strength, 20px)) saturate(180%);
@@ -140,8 +143,8 @@ select {
   overflow: hidden;
 }
 
-/* 纯色背景: 透明, 让 body 的 --bg 透出 */
-.bg-layer-solid { background: transparent; }
+/* 纯色背景: 由 .bg-layer-solid 承载 --bg (body 已透明) */
+.bg-layer-solid { background: var(--bg); }
 
 /* 渐变背景 */
 .bg-layer-gradient {
