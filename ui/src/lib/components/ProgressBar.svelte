@@ -55,7 +55,7 @@
       ></div>
     {:else}
       <div
-        class="absolute h-full rounded-full transition-all duration-300 ease-out {isComplete ? 'bg-success' : 'bg-accent'}"
+        class="absolute h-full rounded-full transition-all duration-300 ease-out progress-shimmer {isComplete ? 'bg-success' : 'bg-accent'}"
         style="width: {percentage}%; left: 0;"
       ></div>
     {/if}

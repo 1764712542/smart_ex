@@ -41,6 +41,7 @@
   import ContextWizard from '$lib/components/ContextWizard.svelte';
   import SettingsPanel from '$lib/components/SettingsPanel.svelte';
   import WorkflowEditor from '$lib/components/WorkflowEditor.svelte';
+  import BackgroundLayer from '$lib/components/BackgroundLayer.svelte';
   import { api } from '$lib/tauri';
   import {
     appState,
@@ -310,12 +311,16 @@
     };
   });
 
-  // L1: 主题/字体变化时重新应用
+  // L1: 主题/字体/背景/动效变化时重新应用
   $effect(() => {
     void settings.theme;
     void settings.accentColor;
     void settings.fontFamily;
     void settings.fontSize;
+    void settings.background.type;
+    void settings.panelOpacity;
+    void settings.blurStrength;
+    void settings.motion.enabled;
     applyAllAppearance();
   });
 
@@ -462,6 +467,7 @@
 </script>
 
 <div class="flex flex-col h-screen bg-bg text-text relative">
+  <BackgroundLayer />
   <!-- Title Bar -->
   <TitleBar
     theme={appState.theme}
@@ -1024,13 +1030,14 @@
               <p class="text-sm">归档为空或无法读取</p>
             </div>
           {:else}
-            {#each archiveEntries as entry (entry.path)}
+            {#each archiveEntries as entry, i (entry.path)}
               {@const selected = appState.selectedFiles.has(entry.path)}
               <button
                 type="button"
                 onclick={() => toggleFileSelection(entry.path)}
                 disabled={entry.is_dir}
-                class="w-full flex items-center gap-3 px-3 py-2 rounded-mac-sm text-left transition-colors {selected
+                style="animation-delay: {Math.min(i * 18, 360)}ms;"
+                class="w-full flex items-center gap-3 px-3 py-2 rounded-mac-sm text-left transition-colors stagger-item {selected
                   ? 'bg-accent/15 text-text'
                   : entry.is_dir
                     ? 'text-text-dim cursor-not-allowed'

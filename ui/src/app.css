@@ -109,11 +109,11 @@ select {
 }
 
 @layer components {
-  /* 玻璃拟态面板 */
+  /* 玻璃拟态面板 — 透明度/模糊由用户设置驱动 */
   .glass {
-    background: color-mix(in srgb, var(--bg-panel) 80%, transparent);
-    backdrop-filter: blur(20px) saturate(180%);
-    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    background: color-mix(in srgb, var(--bg-panel) var(--panel-opacity, 0.8), transparent);
+    backdrop-filter: blur(var(--blur-strength, 20px)) saturate(180%);
+    -webkit-backdrop-filter: blur(var(--blur-strength, 20px)) saturate(180%);
   }
 
   /* Mac 风格按钮 */
@@ -129,4 +129,150 @@ select {
   .btn-danger {
     @apply px-4 py-2 rounded-mac-sm font-medium transition-all duration-150 active:scale-95 bg-error text-white hover:opacity-90;
   }
+}
+
+/* ===== 沉浸式背景层 ===== */
+.bg-layer {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+/* 纯色背景: 透明, 让 body 的 --bg 透出 */
+.bg-layer-solid { background: transparent; }
+
+/* 渐变背景 */
+.bg-layer-gradient {
+  background: linear-gradient(
+    var(--bg-gradient-angle, 135deg),
+    var(--bg-gradient-from, #0a84ff),
+    var(--bg-gradient-to, #bf5af2)
+  );
+}
+
+/* 图片背景 */
+.bg-layer-image {
+  background-image: var(--bg-image, none);
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  filter: blur(var(--bg-image-blur, 0px));
+  opacity: var(--bg-image-opacity, 0.6);
+}
+
+/* 动态渐变背景: 三色循环流动 */
+.bg-layer-animated {
+  background: linear-gradient(
+    120deg,
+    var(--bg-anim-1, #0a84ff),
+    var(--bg-anim-2, #bf5af2),
+    var(--bg-anim-3, #30d158),
+    var(--bg-anim-1, #0a84ff)
+  );
+  background-size: 300% 300%;
+  animation: bgFlow var(--bg-anim-speed, 20s) ease infinite;
+}
+
+/* 暗角覆盖层 */
+.bg-layer-vignette::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at center, transparent 40%, rgba(0,0,0,0.45) 100%);
+  pointer-events: none;
+}
+
+@keyframes bgFlow {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+/* 动效关闭时停止背景流动 */
+:root[data-motion-enabled='false'] .bg-layer-animated { animation: none; }
+:root[data-background-flow='false'] .bg-layer-animated { animation: none; }
+/* prefers-reduced-motion 兜底 */
+@media (prefers-reduced-motion: reduce) {
+  .bg-layer-animated { animation: none; }
+  * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
+
+/* ===== 动效: 卡片悬浮 3D ===== */
+:root[data-card-hover-3d='true'] .card-3d {
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.25s ease;
+  transform-style: preserve-3d;
+  will-change: transform;
+}
+:root[data-card-hover-3d='true'] .card-3d:hover {
+  transform: translateY(-3px) scale(1.01);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.28);
+}
+
+/* ===== 动效: 按钮涟漪 ===== */
+:root[data-button-ripple='true'] .btn-ripple {
+  position: relative;
+  overflow: hidden;
+}
+:root[data-button-ripple='true'] .btn-ripple::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0;
+  height: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.35);
+  transform: translate(-50%, -50%);
+  transition: width 0.5s ease, height 0.5s ease, opacity 0.5s ease;
+  opacity: 0;
+  pointer-events: none;
+}
+:root[data-button-ripple='true'] .btn-ripple:active::after {
+  width: 320px;
+  height: 320px;
+  opacity: 1;
+  transition: width 0s, height 0s, opacity 0s;
+}
+
+/* ===== 动效: 列表交错入场 ===== */
+:root[data-list-stagger='true'] .stagger-item {
+  opacity: 0;
+  animation: staggerIn 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+@keyframes staggerIn {
+  0% { opacity: 0; transform: translateY(10px) scale(0.98); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* ===== 动效: 进度条流光 ===== */
+:root[data-progress-shimmer='true'] .progress-shimmer {
+  position: relative;
+  overflow: hidden;
+}
+:root[data-progress-shimmer='true'] .progress-shimmer::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.4),
+    transparent
+  );
+  transform: translateX(-100%);
+  animation: shimmer 1.6s ease-in-out infinite;
+}
+@keyframes shimmer {
+  100% { transform: translateX(100%); }
+}
+
+/* ===== 动效: 模式切换过渡 ===== */
+:root[data-mode-transition='true'] .mode-transition {
+  animation: modeSlide 0.32s cubic-bezier(0.16, 1, 0.3, 1);
+}
+@keyframes modeSlide {
+  0% { opacity: 0; transform: translateX(12px); }
+  100% { opacity: 1; transform: translateX(0); }
 }

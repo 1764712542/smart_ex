@@ -11,7 +11,7 @@
 </script>
 
 <div
-  class="glass rounded-mac-lg shadow-lg border border-border/50 flex flex-col {className}"
+  class="glass rounded-mac-lg shadow-lg border border-border/50 flex flex-col card-3d {className}"
 >
   {#if title}
     <div class="px-5 py-3 border-b border-border/50 font-semibold text-sm text-text">

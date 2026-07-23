@@ -32,7 +32,7 @@
 </script>
 
 <button
-  class="{variantClass[variant]} {className} {isDisabled
+  class="{variantClass[variant]} btn-ripple {className} {isDisabled
     ? 'opacity-50 cursor-not-allowed pointer-events-none'
     : 'cursor-pointer'}"
   disabled={isDisabled}
