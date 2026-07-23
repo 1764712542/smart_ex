@@ -534,7 +534,9 @@
     ondrop={onDrop}
   >
     <!-- Left: Parameters -->
-    <div class="{paramPanelClass} flex flex-col gap-4 overflow-y-auto pr-1">
+    <div class="{paramPanelClass} flex flex-col gap-4 min-h-0">
+      <!-- 可滚动内容区 -->
+      <div class="flex flex-col gap-4 overflow-y-auto pr-1 min-h-0">
       <!-- 输入输出 -->
       <Panel title="输入 / 输出">
         <div class="flex flex-col gap-3">
@@ -859,28 +861,32 @@
           {/if}
         </div>
       </Panel>
+      </div>
+      <!-- /可滚动内容区 -->
 
-      <!-- 开始按钮 -->
-      <Button
-        variant="primary"
-        onclick={startTask}
-        disabled={!canExecute}
-        loading={appState.working}
-        class="w-full"
-      >
-        {modeVerb}
-      </Button>
-      {#if !canExecute && !appState.working}
-        <p class="text-xs text-text-dim/70 text-center -mt-2">
-          {#if !appState.inputPath}
-            请选择输入文件
-          {:else if passwordRequired && !appState.password}
-            请输入密码
-          {:else if appState.mode === 'decompress' && !appState.outputPath}
-            请选择输出目录
+      <!-- 开始按钮 (固定底部, 不随内容滚动) -->
+      <div class="flex flex-col gap-2 flex-shrink-0">
+        <Button
+          variant="primary"
+          onclick={startTask}
+          disabled={!canExecute}
+          loading={appState.working}
+          class="w-full"
+        >
+          {modeVerb}
+        </Button>
+        {#if !canExecute && !appState.working}
+          <p class="text-xs text-text-dim/70 text-center">
+            {#if !appState.inputPath}
+              请选择输入文件
+            {:else if passwordRequired && !appState.password}
+              请输入密码
+            {:else if appState.mode === 'decompress' && !appState.outputPath}
+              请选择输出目录
           {/if}
         </p>
       {/if}
+    </div>
     </div>
 
     <!-- Right: Progress + Log -->
