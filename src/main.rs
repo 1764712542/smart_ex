@@ -16,18 +16,14 @@ fn main() -> Result<()> {
     // 初始化语言 (zh / en)
     i18n::set_lang(Lang::from_code(&args.lang));
 
-    // 无子命令 + --gui 或完全无参数 → GUI 模式 (Tauri 版本尚未就绪)
+    // 无子命令 + --gui 或完全无参数 → 启动 Tauri GUI
     if args.gui || args.command.is_none() {
-        println!("GUI 模式将在 Tauri 版本中提供, 请使用 CLI 命令 (smart_ex --help)");
-        return Ok(());
+        return launch_gui();
     }
 
     let cmd = args.command.unwrap();
     match cmd {
-        Commands::Gui => {
-            println!("GUI 模式将在 Tauri 版本中提供, 请使用 CLI 命令 (smart_ex --help)");
-            Ok(())
-        }
+        Commands::Gui => launch_gui(),
         Commands::Compress {
             input,
             output,
@@ -63,6 +59,54 @@ fn main() -> Result<()> {
         Commands::List { input, password } => run_list(input, password),
         Commands::Test { input, password } => run_test(input, password),
     }
+}
+
+/// 启动 Tauri GUI 应用
+/// 查找 smartex-tauri 二进制 (同目录 / PATH / .app bundle), 找不到则提示
+fn launch_gui() -> Result<()> {
+    use std::process::Command;
+
+    // 候选路径 (优先级递减)
+    let candidates: Vec<PathBuf> = vec![
+        // 1. 当前可执行文件同目录下的 smartex-tauri
+        std::env::current_exe()
+            .ok()
+            .and_then(|p| p.parent().map(|d| d.join("smartex-tauri")))
+            .into_iter()
+            .collect(),
+        // 2. .app bundle 内的 MacOS/smartex-tauri
+        std::env::current_exe()
+            .ok()
+            .and_then(|p| {
+                p.parent()
+                    .and_then(|d| d.parent())
+                    .map(|app| app.join("Contents").join("MacOS").join("smartex-tauri"))
+            })
+            .into_iter()
+            .collect(),
+        // 3. PATH 中查找
+        which::which("smartex-tauri").ok().into_iter().collect(),
+        // 4. Homebrew / /usr/local/bin
+        PathBuf::from("/usr/local/bin/smartex-tauri"),
+        PathBuf::from("/opt/homebrew/bin/smartex-tauri"),
+    ];
+
+    for bin in &candidates {
+        if bin.exists() {
+            Command::new(bin)
+                .stdin(std::process::Stdio::null())
+                .spawn()
+                .map_err(|e| anyhow::anyhow!("启动 GUI 失败: {}", e))?;
+            return Ok(());
+        }
+    }
+
+    eprintln!("未找到 Tauri GUI 二进制 (smartex-tauri)。");
+    eprintln!("请通过以下方式启动 GUI:");
+    eprintln!("  cargo tauri dev                    # 开发模式");
+    eprintln!("  open target/release/bundle/macos/SmartEx.app  # 使用已构建的 .app");
+    eprintln!("\n或使用 CLI 命令: smart_ex --help");
+    Ok(())
 }
 
 fn parse_container(s: &str) -> Result<Container> {
