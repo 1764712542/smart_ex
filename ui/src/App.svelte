@@ -25,6 +25,12 @@
     Info,
     Workflow,
     Play,
+    ListTree,
+    Check,
+    X,
+    FileText,
+    Folder,
+    Loader2,
   } from 'lucide-svelte';
   import type { ComponentType } from 'svelte';
   import TitleBar from '$lib/components/TitleBar.svelte';
@@ -58,6 +64,11 @@
     canStart,
     levelRange,
     COMPRESS_FORMATS,
+    browseArchive,
+    toggleFileSelection,
+    selectAllFiles,
+    clearSelection,
+    extractSelected,
     type Mode,
     type LogEntry,
   } from '$lib/stores/app.svelte';
@@ -241,6 +252,8 @@
           input: appState.inputPath,
           output: appState.outputPath,
           password: appState.password || undefined,
+          conflictPolicy: appState.conflictPolicy,
+          preserveSymlinks: appState.preserveSymlinks,
         });
         pushLog(`解压完成: ${result}`, 'success');
         showToast('解压完成', 'success', result);
@@ -393,6 +406,44 @@
   let statusColor = $derived(
     appState.working ? 'bg-warn' : appState.statusText === '完成' ? 'bg-success' : 'bg-success',
   );
+
+  // ===== 解压选项派生 =====
+  let isDecompressMode = $derived(appState.mode === 'decompress');
+  let showArchiveBrowser = $derived(appState.showArchiveBrowser);
+  let archiveEntries = $derived(appState.archiveEntries);
+  let selectedCount = $derived(appState.selectedFiles.size);
+
+  // 归档浏览加载状态
+  let browsingArchive = $state(false);
+
+  async function onBrowseArchive(): Promise<void> {
+    if (!appState.inputPath) {
+      showToast('请先选择归档文件', 'warn');
+      return;
+    }
+    browsingArchive = true;
+    try {
+      await browseArchive();
+    } finally {
+      browsingArchive = false;
+    }
+  }
+
+  async function onExtractSelected(): Promise<void> {
+    await extractSelected();
+  }
+
+  function onCloseArchiveBrowser(): void {
+    appState.showArchiveBrowser = false;
+  }
+
+  // ===== 文件大小格式化 =====
+  function formatBytes(n: number): string {
+    if (n >= 1024 * 1024 * 1024) return `${(n / 1024 / 1024 / 1024).toFixed(1)} GB`;
+    if (n >= 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
+    if (n >= 1024) return `${(n / 1024).toFixed(1)} KB`;
+    return `${n} B`;
+  }
 </script>
 
 <div class="flex flex-col h-screen bg-bg text-text relative">
@@ -604,6 +655,96 @@
             {/if}
           {/if}
 
+          <!-- 解压选项 -->
+          {#if isDecompressMode}
+            <!-- 冲突策略 -->
+            <div>
+              <label class="text-sm font-medium text-text-dim mb-1.5 block">冲突处理策略</label>
+              <div class="grid grid-cols-3 gap-1.5">
+                <button
+                  type="button"
+                  onclick={() => (appState.conflictPolicy = 'overwrite')}
+                  disabled={appState.working}
+                  class="px-2 py-1.5 rounded-mac-sm text-xs font-medium transition-all {appState.conflictPolicy === 'overwrite'
+                    ? 'bg-accent text-white shadow-sm'
+                    : 'bg-bg-hover text-text-dim hover:text-text'}"
+                >
+                  覆盖
+                </button>
+                <button
+                  type="button"
+                  onclick={() => (appState.conflictPolicy = 'skip')}
+                  disabled={appState.working}
+                  class="px-2 py-1.5 rounded-mac-sm text-xs font-medium transition-all {appState.conflictPolicy === 'skip'
+                    ? 'bg-accent text-white shadow-sm'
+                    : 'bg-bg-hover text-text-dim hover:text-text'}"
+                >
+                  跳过
+                </button>
+                <button
+                  type="button"
+                  onclick={() => (appState.conflictPolicy = 'rename')}
+                  disabled={appState.working}
+                  class="px-2 py-1.5 rounded-mac-sm text-xs font-medium transition-all {appState.conflictPolicy === 'rename'
+                    ? 'bg-accent text-white shadow-sm'
+                    : 'bg-bg-hover text-text-dim hover:text-text'}"
+                >
+                  重命名
+                </button>
+              </div>
+              <p class="text-xs text-text-dim/70 mt-1">
+                {#if appState.conflictPolicy === 'overwrite'}
+                  同名文件将被覆盖
+                {:else if appState.conflictPolicy === 'skip'}
+                  同名文件将保留原版
+                {:else}
+                  同名文件自动重命名 (如 file_1.txt)
+                {/if}
+              </p>
+            </div>
+
+            <!-- 保留符号链接 -->
+            <div class="flex items-center justify-between">
+              <div>
+                <span class="text-sm font-medium text-text block">保留符号链接</span>
+                <span class="text-xs text-text-dim/70">仅 tar 系列, Windows 自动跳过</span>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={appState.preserveSymlinks}
+                onclick={() => (appState.preserveSymlinks = !appState.preserveSymlinks)}
+                disabled={appState.working}
+                class="relative w-10 h-6 rounded-full transition-colors {appState.preserveSymlinks
+                  ? 'bg-accent'
+                  : 'bg-bg-hover'} {appState.working ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}"
+              >
+                <span
+                  class="absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow-sm transition-transform {appState.preserveSymlinks
+                    ? 'translate-x-4'
+                    : ''}"
+                ></span>
+              </button>
+            </div>
+
+            <!-- 浏览归档 -->
+            <button
+              onclick={onBrowseArchive}
+              disabled={appState.working || !appState.inputPath || browsingArchive}
+              class="flex items-center justify-center gap-2 px-3 py-2.5 rounded-mac-sm border border-accent/40 bg-accent/10 text-accent font-medium text-sm transition-all duration-150 hover:bg-accent/15 active:scale-[0.98] {appState.working || !appState.inputPath || browsingArchive
+                ? 'opacity-50 cursor-not-allowed'
+                : 'cursor-pointer'}"
+            >
+              {#if browsingArchive}
+                <Loader2 size={16} class="animate-spin" />
+                读取中...
+              {:else}
+                <ListTree size={16} />
+                浏览归档 (部分解压)
+              {/if}
+            </button>
+          {/if}
+
           <!-- 密码 (压缩/解压可选, 加密/解密必填) -->
           {#if showPassword}
             <div>
@@ -808,7 +949,7 @@
   <!-- Toast -->
   {#if currentToast}
     {#key currentToast.id}
-      <div class="fixed bottom-12 right-6 z-50">
+      <div class="fixed bottom-12 right-6 z-[60]">
         <Toast
           type={currentToast.kind}
           message={currentToast.message}
@@ -818,6 +959,124 @@
         />
       </div>
     {/key}
+  {/if}
+
+  <!-- 归档浏览面板 (部分解压) -->
+  {#if showArchiveBrowser}
+    <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+      <div class="w-full max-w-2xl max-h-[80vh] flex flex-col bg-bg-panel rounded-mac-lg border border-border/60 shadow-2xl animate-scale-in">
+        <!-- 头部 -->
+        <div class="flex items-center justify-between px-4 py-3 border-b border-border/50">
+          <div class="flex items-center gap-2">
+            <ListTree size={16} class="text-accent" />
+            <h2 class="text-sm font-semibold text-text">归档内容浏览</h2>
+            <span class="text-xs text-text-dim">({archiveEntries.length} 项)</span>
+          </div>
+          <button
+            onclick={onCloseArchiveBrowser}
+            class="p-1 rounded-mac-sm text-text-dim hover:text-text hover:bg-bg-hover transition-colors"
+            aria-label="关闭"
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        <!-- 工具栏 -->
+        <div class="flex items-center justify-between px-4 py-2 border-b border-border/50 bg-bg-hover/30">
+          <div class="flex items-center gap-2">
+            <button
+              onclick={selectAllFiles}
+              class="flex items-center gap-1 px-2 py-1 text-xs text-text-dim hover:text-accent hover:bg-bg-hover rounded-mac-sm transition-colors"
+            >
+              <Check size={12} />
+              全选
+            </button>
+            <button
+              onclick={clearSelection}
+              class="flex items-center gap-1 px-2 py-1 text-xs text-text-dim hover:text-text hover:bg-bg-hover rounded-mac-sm transition-colors"
+            >
+              <X size={12} />
+              清空
+            </button>
+          </div>
+          <span class="text-xs text-text-dim">
+            已选 <span class="text-accent font-medium">{selectedCount}</span> 个文件
+          </span>
+        </div>
+
+        <!-- 文件列表 -->
+        <div class="flex-1 overflow-y-auto p-2 min-h-0">
+          {#if archiveEntries.length === 0}
+            <div class="flex flex-col items-center justify-center py-12 text-text-dim">
+              <ListTree size={32} class="opacity-40 mb-2" />
+              <p class="text-sm">归档为空或无法读取</p>
+            </div>
+          {:else}
+            {#each archiveEntries as entry (entry.path)}
+              {@const selected = appState.selectedFiles.has(entry.path)}
+              <button
+                type="button"
+                onclick={() => toggleFileSelection(entry.path)}
+                disabled={entry.is_dir}
+                class="w-full flex items-center gap-3 px-3 py-2 rounded-mac-sm text-left transition-colors {selected
+                  ? 'bg-accent/15 text-text'
+                  : entry.is_dir
+                    ? 'text-text-dim cursor-not-allowed'
+                    : 'text-text hover:bg-bg-hover'}"
+              >
+                <!-- 勾选框 -->
+                <span
+                  class="flex-shrink-0 w-4 h-4 rounded border flex items-center justify-center transition-all {selected
+                    ? 'bg-accent border-accent'
+                    : entry.is_dir
+                      ? 'border-border/40 opacity-40'
+                      : 'border-border'}"
+                >
+                  {#if selected}
+                    <Check size={11} class="text-white" />
+                  {/if}
+                </span>
+
+                <!-- 图标 -->
+                {#if entry.is_dir}
+                  <Folder size={14} class="flex-shrink-0 text-warn" />
+                {:else}
+                  <FileText size={14} class="flex-shrink-0 text-text-dim" />
+                {/if}
+
+                <!-- 路径 -->
+                <span class="flex-1 min-w-0 truncate text-sm font-mono">{entry.path}</span>
+
+                <!-- 大小 -->
+                {#if !entry.is_dir}
+                  <span class="flex-shrink-0 text-xs text-text-dim font-mono">
+                    {formatBytes(entry.size)}
+                  </span>
+                {/if}
+              </button>
+            {/each}
+          {/if}
+        </div>
+
+        <!-- 底部操作 -->
+        <div class="flex items-center justify-between gap-3 px-4 py-3 border-t border-border/50">
+          <p class="text-xs text-text-dim">
+            输出目录: <span class="font-mono">{appState.outputPath || '(未设置)'}</span>
+          </p>
+          <div class="flex items-center gap-2">
+            <Button variant="secondary" onclick={onCloseArchiveBrowser}>取消</Button>
+            <Button
+              variant="primary"
+              onclick={onExtractSelected}
+              disabled={selectedCount === 0 || !appState.outputPath || appState.working}
+              loading={appState.working}
+            >
+              解压选中 ({selectedCount})
+            </Button>
+          </div>
+        </div>
+      </div>
+    </div>
   {/if}
 
   <!-- 智能推荐向导 -->

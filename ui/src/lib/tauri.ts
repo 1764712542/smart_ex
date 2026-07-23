@@ -22,6 +22,9 @@ export interface DecompressParams {
   input: string;
   output: string;
   password?: string;
+  conflictPolicy?: 'overwrite' | 'skip' | 'rename';
+  preserveSymlinks?: boolean;
+  cleanupOnError?: boolean;
 }
 
 export interface ArchiveEntry {
@@ -61,6 +64,8 @@ export const api = {
     invoke<string>('decrypt', { input, output, password }),
   listArchive: (input: string, password?: string) =>
     invoke<ArchiveEntry[]>('list_archive', { input, password }),
+  extractPartial: (input: string, output: string, files: string[], password?: string) =>
+    invoke<string>('extract_partial', { input, output, files, password }),
   testArchive: (input: string, password?: string) =>
     invoke<TestResult>('test_archive', { input, password }),
   // 痛点①: 上下文感知压缩

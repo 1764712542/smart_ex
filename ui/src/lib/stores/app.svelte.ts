@@ -1,6 +1,6 @@
 // 全局应用状态 (Svelte 5 runes)
 // 使用 $state 创建响应式对象, 通过方法修改状态
-import { api, type CompressionIntent, type FormatSuggestion } from '$lib/tauri';
+import { api, type CompressionIntent, type FormatSuggestion, type ArchiveEntry } from '$lib/tauri';
 
 export type Mode = 'compress' | 'decompress' | 'encrypt' | 'decrypt';
 
@@ -56,6 +56,15 @@ interface AppState {
 
   // 拖放遮罩
   dragOver: boolean;
+
+  // 解压选项
+  conflictPolicy: 'overwrite' | 'skip' | 'rename';
+  preserveSymlinks: boolean;
+
+  // 归档浏览 (部分解压)
+  archiveEntries: ArchiveEntry[];
+  selectedFiles: Set<string>;
+  showArchiveBrowser: boolean;
 }
 
 function defaultIntent(): CompressionIntent {
@@ -96,6 +105,12 @@ export const appState = $state<AppState>({
   wizardIntent: defaultIntent(),
 
   dragOver: false,
+
+  conflictPolicy: 'overwrite',
+  preserveSymlinks: true,
+  archiveEntries: [],
+  selectedFiles: new Set(),
+  showArchiveBrowser: false,
 });
 
 // ===== 日志 =====
@@ -217,6 +232,58 @@ export function setDragOver(value: boolean): void {
 export function setDragDroppedPath(path: string): void {
   appState.inputPath = path;
   autoFillOutput();
+}
+
+// ===== 归档浏览 + 部分解压 =====
+export async function browseArchive(): Promise<void> {
+  if (!appState.inputPath) return;
+  try {
+    const entries = await api.listArchive(appState.inputPath, appState.password || undefined);
+    appState.archiveEntries = entries;
+    appState.selectedFiles = new Set();
+    appState.showArchiveBrowser = true;
+  } catch (e) {
+    showToast('浏览归档失败', 'error', String(e));
+  }
+}
+
+export function toggleFileSelection(path: string): void {
+  const sel = new Set(appState.selectedFiles);
+  if (sel.has(path)) {
+    sel.delete(path);
+  } else {
+    sel.add(path);
+  }
+  appState.selectedFiles = sel;
+}
+
+export function selectAllFiles(): void {
+  appState.selectedFiles = new Set(appState.archiveEntries.filter((e) => !e.is_dir).map((e) => e.path));
+}
+
+export function clearSelection(): void {
+  appState.selectedFiles = new Set();
+}
+
+export async function extractSelected(): Promise<void> {
+  if (appState.selectedFiles.size === 0) {
+    showToast('未选择任何文件', 'warn');
+    return;
+  }
+  if (!appState.outputPath) {
+    showToast('请先设置输出目录', 'warn');
+    return;
+  }
+  try {
+    const files = Array.from(appState.selectedFiles);
+    const result = await api.extractPartial(appState.inputPath, appState.outputPath, files, appState.password || undefined);
+    showToast(`已解压 ${files.length} 个文件`, 'success', result);
+    pushLog(`部分解压完成: ${files.length} 个文件 → ${result}`, 'success');
+    appState.showArchiveBrowser = false;
+  } catch (e) {
+    showToast('部分解压失败', 'error', String(e));
+    pushLog(`部分解压失败: ${String(e)}`, 'error');
+  }
 }
 
 // ===== 文件对话框 =====

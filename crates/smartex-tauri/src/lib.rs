@@ -59,6 +59,30 @@ pub struct DecompressParams {
     pub input: String,
     pub output: String,
     pub password: Option<String>,
+    /// 冲突策略: overwrite | skip | rename (默认 overwrite)
+    #[serde(rename = "conflictPolicy", default)]
+    pub conflict_policy: Option<String>,
+    /// 是否保留符号链接 (默认 true)
+    #[serde(rename = "preserveSymlinks", default)]
+    pub preserve_symlinks: Option<bool>,
+    /// 解压失败时是否清理半成品 (默认 true)
+    #[serde(rename = "cleanupOnError", default)]
+    pub cleanup_on_error: Option<bool>,
+}
+
+/// 从 DecompressParams 构造 ExtractOptions
+fn build_extract_opts(params: &DecompressParams) -> decompress::ExtractOptions {
+    let conflict = match params.conflict_policy.as_deref() {
+        Some("skip") => decompress::ConflictPolicy::Skip,
+        Some("rename") => decompress::ConflictPolicy::Rename,
+        _ => decompress::ConflictPolicy::Overwrite,
+    };
+    decompress::ExtractOptions {
+        conflict,
+        password: params.password.clone(),
+        preserve_symlinks: params.preserve_symlinks.unwrap_or(true),
+        cleanup_on_error: params.cleanup_on_error.unwrap_or(true),
+    }
 }
 
 // ── 返回值 DTO ──
@@ -278,13 +302,14 @@ async fn compress(params: CompressParams, app: AppHandle) -> Result<String, Stri
 async fn decompress(params: DecompressParams, app: AppHandle) -> Result<String, String> {
     let input = PathBuf::from(&params.input);
     let output = PathBuf::from(&params.output);
-    let password = params.password;
+    let opts = build_extract_opts(&params);
     let callback = make_progress_callback(&app, "解压中");
 
     tokio::task::spawn_blocking(move || -> anyhow::Result<String> {
         let bar = progress::Progress::new_with_callback("decompress", callback);
-        let pwd = password.as_deref();
-        decompress::decompress_with_password(&input, &output, pwd, &bar)?;
+        let container = format::detect(&input)
+            .ok_or_else(|| anyhow::anyhow!("无法识别归档格式"))?;
+        decompress::decompress_with(&input, &output, container, &opts, &bar)?;
         bar.finish("done");
         Ok(output.to_string_lossy().to_string())
     })
@@ -382,6 +407,30 @@ async fn list_archive(
                 is_dir: e.is_dir,
             })
             .collect())
+    })
+    .await
+    .map_err(|e| format!("任务执行失败: {}", e))?
+    .map_err(|e| e.to_string())
+}
+
+/// 部分解压: 只解压归档中指定的文件
+#[tauri::command]
+async fn extract_partial(
+    input: String,
+    output: String,
+    files: Vec<String>,
+    password: Option<String>,
+) -> Result<String, String> {
+    let archive_path = PathBuf::from(&input);
+    let output_dir = PathBuf::from(&output);
+    let opts = decompress::ExtractOptions {
+        password,
+        ..Default::default()
+    };
+
+    tokio::task::spawn_blocking(move || -> anyhow::Result<String> {
+        decompress::extract_partial(&archive_path, &output_dir, &files, &opts)?;
+        Ok(output_dir.to_string_lossy().to_string())
     })
     .await
     .map_err(|e| format!("任务执行失败: {}", e))?
@@ -513,6 +562,7 @@ pub fn run() {
             encrypt,
             decrypt,
             list_archive,
+            extract_partial,
             test_archive,
             suggest_format,
             keychain_get,
