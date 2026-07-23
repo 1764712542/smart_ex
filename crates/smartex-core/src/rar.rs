@@ -30,7 +30,6 @@ pub fn rar_decompress(
 
     std::fs::create_dir_all(output)?;
 
-    let mut count = 0u64;
     loop {
         match open
             .read_header()
@@ -58,7 +57,6 @@ pub fn rar_decompress(
                         .extract_with_base(output)
                         .map_err(|e| anyhow::anyhow!("提取 RAR 文件失败: {}", e))?;
                 }
-                count += 1;
                 bar.inc(1);
             }
             None => break,
