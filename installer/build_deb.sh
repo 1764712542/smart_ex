@@ -17,7 +17,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-VERSION="0.5.0"
+VERSION="0.7.1"
 ARCH="${1:-amd64}"
 
 GREEN='\033[0;32m'
@@ -122,12 +122,12 @@ Description: Smart compression/decompression with encryption and GUI
  formats including ZIP, 7z, RAR, TAR, and more. Features include:
  .
  - AES-256 encryption (compatible with 7-Zip/WinRAR/Bandizip)
- - Beautiful dark glassmorphism GUI (eframe/egui)
- - Right-click context menu integration
- - Chinese/English bilingual interface
+ - Modern glassmorphism GUI (Tauri 2 + Svelte 5)
+ - Context-aware format recommendation
+ - Partial extraction and conflict strategies
  - Cross-platform: Linux, macOS, Windows
  - Free and open source (MIT)
-Homepage: https://github.com/smartex/smart_ex
+Homepage: https://github.com/1764712542/smart_ex
 CTRL
 
 # 8. 生成 DEBIAN/postinst (安装后触发)

@@ -1,0 +1,79 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '发布版本号 (如 v0.7.1)'
+        required: true
+        default: 'v0.7.1'
+
+jobs:
+  publish:
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            args: '--target aarch64-apple-darwin'
+          - platform: macos-latest
+            args: '--target x86_64-apple-darwin'
+          - platform: ubuntu-22.04
+            args: ''
+          - platform: windows-latest
+            args: ''
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './ -> target'
+
+      - name: Install Linux dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libssl-dev libgtk-3-dev
+
+      - name: Install frontend dependencies
+        run: |
+          cd ui
+          npm ci
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.event.inputs.tag || github.ref_name }}
+          releaseName: '${{ github.event.inputs.tag || github.ref_name }} — SmartEx'
+          releaseBody: |
+            ## SmartEx ${{ github.event.inputs.tag || github.ref_name }}
+
+            ### 下载对应平台的安装包:
+            - **macOS (Apple Silicon)**: `.dmg` (aarch64)
+            - **macOS (Intel)**: `.dmg` (x64)
+            - **Linux**: `.deb` / `.AppImage`
+            - **Windows**: `.msi` / `.exe`
+
+            安装后双击 `.zip` `.7z` `.rar` 等文件会自动用 SmartEx 打开。
+          releaseDraft: false
+          prerelease: false
+          args: ${{ matrix.args }}

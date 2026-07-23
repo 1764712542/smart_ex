@@ -9,7 +9,7 @@
 ; ──────────────────────────────────────────────────────────────
 
 #define MyAppName "smart_ex"
-#define MyAppVersion "0.5.0"
+#define MyAppVersion "0.7.1"
 #define MyAppPublisher "smart_ex"
 #define MyAppExeName "smart_ex.exe"
 #define MyAppDescription "Smart Compression & Decompression"
