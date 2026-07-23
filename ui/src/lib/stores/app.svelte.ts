@@ -5,6 +5,7 @@ import { api, type CompressionIntent, type FormatSuggestion, type ArchiveEntry }
 export type Mode = 'compress' | 'decompress' | 'encrypt' | 'decrypt';
 
 export interface LogEntry {
+  id: number;
   text: string;
   kind: 'info' | 'success' | 'warn' | 'error';
   time: string;
@@ -118,8 +119,11 @@ function nowTime(): string {
   return new Date().toLocaleTimeString('zh-CN', { hour12: false });
 }
 
+let logSeq = 0;
+
 export function pushLog(text: string, kind: LogEntry['kind'] = 'info'): void {
-  appState.logs.push({ text, kind, time: nowTime() });
+  logSeq += 1;
+  appState.logs.push({ id: logSeq, text, kind, time: nowTime() });
   if (appState.logs.length > 500) appState.logs.splice(0, appState.logs.length - 500);
 }
 

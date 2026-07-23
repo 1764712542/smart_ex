@@ -14,8 +14,9 @@ use smartex_core::{
 };
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 // ── 进度事件 payload ──
 
@@ -27,16 +28,19 @@ pub struct ProgressPayload {
     pub message: String,
 }
 
-// ── 全局状态: 会话级钥匙串 ──
+// ── 全局状态: 会话级钥匙串 + 任务取消标志 ──
 
 pub struct AppState {
     pub keychain: keychain::SessionKeychain,
+    /// 任务取消标志: compress/decompress 启动前清零, 前端 cancel 命令置为 true
+    pub cancel: Arc<AtomicBool>,
 }
 
 impl Default for AppState {
     fn default() -> Self {
         Self {
             keychain: keychain::SessionKeychain::new(),
+            cancel: Arc::new(AtomicBool::new(false)),
         }
     }
 }
@@ -271,6 +275,14 @@ async fn compress(params: CompressParams, app: AppHandle) -> Result<String, Stri
     let excludes = params.exclude.unwrap_or_default();
     let split = params.split;
     let callback = make_progress_callback(&app, "压缩中");
+    // Bug 3 修复: 任务启动前清零 cancel 标志
+    let cancel = {
+        let state = app.state::<Mutex<AppState>>();
+        let state = state.lock().map_err(|e| format!("状态锁失败: {}", e))?;
+        state.cancel.clone()
+    };
+    cancel.store(false, Ordering::SeqCst);
+    let app_handle = app.clone();
 
     tokio::task::spawn_blocking(move || -> anyhow::Result<String> {
         let bar = progress::Progress::new_with_callback("compress", callback);
@@ -282,10 +294,27 @@ async fn compress(params: CompressParams, app: AppHandle) -> Result<String, Stri
                 &input, &output, container, level, pwd, &bar, &excludes,
             )?;
         }
+        // Bug 3: 在分卷前检查取消
+        if cancel.load(Ordering::SeqCst) {
+            let _ = std::fs::remove_file(&output);
+            anyhow::bail!("任务已取消");
+        }
         // 分卷切割 (可选)
         if let Some(ref split_str) = split {
+            // Bug 15 修复: 分卷前通知前端
+            let _ = app_handle.emit("progress", ProgressPayload {
+                progress: 0.99,
+                bytes_done: 0,
+                bytes_total: 0,
+                message: "分卷切割中".to_string(),
+            });
             let split_size = compress::parse_split_size(split_str)?;
-            compress::split_file(&output, split_size)?;
+            let parts = compress::split_file(&output, split_size)?;
+            bar.finish("done");
+            // Bug 6 修复: split_file 删除原文件, 返回第一个分卷路径
+            if let Some(first) = parts.first() {
+                return Ok(first.to_string_lossy().to_string());
+            }
         }
         bar.finish("done");
         Ok(output.to_string_lossy().to_string())
@@ -297,25 +326,49 @@ async fn compress(params: CompressParams, app: AppHandle) -> Result<String, Stri
 
 /// 解压归档
 ///
-/// 自动检测归档格式, 支持密码解密 (zip/7z/rar)。
+/// 自动检测归档格式, 支持密码解压 (zip/7z/rar)。
 #[tauri::command]
 async fn decompress(params: DecompressParams, app: AppHandle) -> Result<String, String> {
     let input = PathBuf::from(&params.input);
     let output = PathBuf::from(&params.output);
     let opts = build_extract_opts(&params);
     let callback = make_progress_callback(&app, "解压中");
+    // Bug 3 修复: 任务启动前清零 cancel 标志
+    let cancel = {
+        let state = app.state::<Mutex<AppState>>();
+        let state = state.lock().map_err(|e| format!("状态锁失败: {}", e))?;
+        state.cancel.clone()
+    };
+    cancel.store(false, Ordering::SeqCst);
 
     tokio::task::spawn_blocking(move || -> anyhow::Result<String> {
         let bar = progress::Progress::new_with_callback("decompress", callback);
         let container = format::detect(&input)
             .ok_or_else(|| anyhow::anyhow!("无法识别归档格式"))?;
         decompress::decompress_with(&input, &output, container, &opts, &bar)?;
+        if cancel.load(Ordering::SeqCst) {
+            anyhow::bail!("任务已取消");
+        }
         bar.finish("done");
         Ok(output.to_string_lossy().to_string())
     })
     .await
     .map_err(|e| format!("任务执行失败: {}", e))?
     .map_err(|e| e.to_string())
+}
+
+/// 取消正在执行的任务
+///
+/// 设置全局 cancel 标志, 后端在下一个检查点停止并返回错误。
+#[tauri::command]
+async fn cancel_task(app: AppHandle) -> Result<(), String> {
+    let cancel = {
+        let state = app.state::<Mutex<AppState>>();
+        let state = state.lock().map_err(|e| format!("状态锁失败: {}", e))?;
+        state.cancel.clone()
+    };
+    cancel.store(true, Ordering::SeqCst);
+    Ok(())
 }
 
 /// 流式加密文件 (AES-256-GCM 分块, 恒定内存 ~8MB)
@@ -571,6 +624,7 @@ pub fn run() {
             pick_file,
             pick_folder,
             save_file,
+            cancel_task,
         ])
         // 拖放文件: 把路径发给前端
         .on_window_event(|window, event| {

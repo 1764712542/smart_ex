@@ -392,13 +392,19 @@ fn tar_extract_with<R: Read>(
     extracted_files: &mut Vec<PathBuf>,
 ) -> Result<()> {
     let mut archive = tar::Archive::new(BufReader::with_capacity(BUF_SIZE, reader));
-    let mut count = 0u64;
     let mut extracted_bytes: u64 = 0;
 
     for entry in archive.entries()? {
         let mut entry = entry?;
         let path = entry.path()?.into_owned();
-        let outpath = output.join(&path);
+        // Bug 1 修复: 路径穿越防护 (tar slip), 不再直接 output.join(&path)
+        let outpath = match safe_join(output, &path.to_string_lossy()) {
+            Some(p) => p,
+            None => {
+                eprintln!("警告: 检测到路径穿越, 跳过: {}", path.display());
+                continue;
+            }
+        };
         let entry_type = entry.header().entry_type();
 
         if entry_type.is_symlink() {
@@ -412,12 +418,26 @@ fn tar_extract_with<R: Read>(
                     match entry.link_name()? {
                         Some(target) => {
                             let target_path = target.as_ref();
+                            // Bug 2 修复: symlink 目标消毒
+                            // 拒绝绝对路径目标, 防止 symlink 指向敏感系统文件
+                            let target_str = target_path.to_string_lossy();
+                            if target_str.starts_with('/') || target_str.contains("..") {
+                                eprintln!(
+                                    "警告: 符号链接目标不安全, 跳过: {} -> {}",
+                                    outpath.display(),
+                                    target_str
+                                );
+                                continue;
+                            }
                             if let Err(e) = std::os::unix::fs::symlink(target_path, &outpath) {
                                 eprintln!(
                                     "警告: 创建符号链接失败 {}: {}",
                                     outpath.display(),
                                     e
                                 );
+                            } else {
+                                // Bug 18 修复: symlink 也记录到 extracted_files, 便于失败时清理
+                                extracted_files.push(outpath.clone());
                             }
                         }
                         None => {
@@ -451,8 +471,6 @@ fn tar_extract_with<R: Read>(
             let target_path = match resolve_conflict(&outpath, opts.conflict) {
                 Some(p) => p,
                 None => {
-                    count += 1;
-                    bar.set_total(count);
                     bar.inc(1);
                     continue;
                 }
@@ -489,8 +507,8 @@ fn tar_extract_with<R: Read>(
                 );
             }
         }
-        count += 1;
-        bar.set_total(count);
+        // Bug 10 修复: 不再把 total 设成当前 count (会导致进度条恒 100%)
+        // tar 是流式格式无法预知总数, 仅 inc 不 set_total (前端显示 indeterminate)
         bar.inc(1);
     }
     Ok(())
@@ -858,12 +876,8 @@ fn extract_partial_zip(
 
         let name = entry.name().to_string();
 
-        // 检查是否在要解压的文件列表中 (精确匹配或目录前缀匹配)
-        let should_extract = files_to_extract.iter().any(|f| {
-            &name == f || name.starts_with(&format!("{}/", f))
-        });
-
-        if !should_extract {
+        // Bug 12 修复: 使用统一的 should_extract 函数 (正确处理尾部斜杠)
+        if !should_extract(&name, files_to_extract) {
             bar.inc(1);
             continue;
         }
@@ -938,12 +952,8 @@ fn extract_partial_tar<R: Read>(
         let mut entry = entry?;
         let name = entry.path()?.to_string_lossy().to_string();
 
-        // 检查是否在要解压的文件列表中
-        let should_extract = files_to_extract.iter().any(|f| {
-            &name == f || name.starts_with(&format!("{}/", f))
-        });
-
-        if !should_extract {
+        // Bug 12 修复: 使用统一的 should_extract 函数 (正确处理尾部斜杠)
+        if !should_extract(&name, files_to_extract) {
             continue;
         }
 
@@ -1052,12 +1062,25 @@ pub fn test_archive(path: &Path, password: Option<&str>, bar: &Progress) -> Resu
         Container::SevenZ => test_7z(path, password, bar),
         Container::Rar => test_rar(path, password, bar),
         Container::Single => {
+            // Bug 4 修复: 用唯一临时目录避免泄漏, 测试后清理
+            let tmp_dir = std::env::temp_dir().join(format!(
+                "smartex_test_single_{}_{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_nanos())
+                    .unwrap_or(0)
+            ));
+            std::fs::create_dir_all(&tmp_dir)?;
             let mut dummy: Vec<PathBuf> = Vec::new();
             let opts = ExtractOptions {
                 password: password.map(|s| s.to_string()),
                 ..Default::default()
             };
-            single_decompress(path, std::env::temp_dir().as_path(), &opts, bar, &mut dummy)?;
+            let result = single_decompress(path, &tmp_dir, &opts, bar, &mut dummy);
+            // 无论成功失败都清理临时目录
+            let _ = std::fs::remove_dir_all(&tmp_dir);
+            result?;
             Ok((1, 0))
         }
     }
@@ -1116,8 +1139,15 @@ fn test_tar<R: Read>(reader: R, bar: &Progress) -> Result<(usize, u64)> {
 }
 
 fn test_7z(path: &Path, password: Option<&str>, bar: &Progress) -> Result<(usize, u64)> {
-    // 7z 库无独立 list API, 解压到临时目录验证
-    let tmp = std::env::temp_dir().join(format!("smartex_test_7z_{}", std::process::id()));
+    // Bug 5 修复: 用唯一临时目录避免并发冲突
+    let tmp = std::env::temp_dir().join(format!(
+        "smartex_test_7z_{}_{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    ));
     let result = if let Some(pwd) = password {
         sevenz_rust::decompress_file_with_password(path, &tmp, pwd.into())
     } else {
@@ -1141,8 +1171,15 @@ fn test_7z(path: &Path, password: Option<&str>, bar: &Progress) -> Result<(usize
 }
 
 fn test_rar(path: &Path, password: Option<&str>, bar: &Progress) -> Result<(usize, u64)> {
-    // RAR 库无独立 list API, 解压到临时目录验证
-    let tmp = std::env::temp_dir().join(format!("smartex_test_rar_{}", std::process::id()));
+    // Bug 5 修复: 用唯一临时目录避免并发冲突
+    let tmp = std::env::temp_dir().join(format!(
+        "smartex_test_rar_{}_{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    ));
     crate::rar::rar_decompress(path, &tmp, password, bar)?;
     let count = count_files_recursive(&tmp);
     let bytes = dir_size(&tmp);

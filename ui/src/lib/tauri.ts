@@ -79,6 +79,8 @@ export const api = {
   pickFile: () => invoke<string | null>('pick_file'),
   pickFolder: () => invoke<string | null>('pick_folder'),
   saveFile: () => invoke<string | null>('save_file'),
+  // 取消正在执行的任务
+  cancelTask: () => invoke<void>('cancel_task'),
 };
 
 // 进度监听

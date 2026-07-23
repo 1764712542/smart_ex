@@ -371,8 +371,7 @@
     if (matchShortcut(settings.shortcuts.cancel, e)) {
       if (appState.working) {
         e.preventDefault();
-        pushLog('取消请求已发送 (后端将在下一个检查点停止)', 'warn');
-        showToast('已请求取消', 'warn');
+        void onCancelTask();
       }
       return;
     }
@@ -404,7 +403,11 @@
 
   // ===== 状态栏颜色 =====
   let statusColor = $derived(
-    appState.working ? 'bg-warn' : appState.statusText === '完成' ? 'bg-success' : 'bg-success',
+    appState.working
+      ? 'bg-warn'
+      : appState.statusText.includes('失败') || appState.statusText.includes('取消')
+        ? 'bg-error'
+        : 'bg-success',
   );
 
   // ===== 解压选项派生 =====
@@ -435,6 +438,18 @@
 
   function onCloseArchiveBrowser(): void {
     appState.showArchiveBrowser = false;
+  }
+
+  // ===== Bug 3 修复: 取消任务真正调用后端 =====
+  async function onCancelTask(): Promise<void> {
+    try {
+      await api.cancelTask();
+      pushLog('取消请求已发送 (后端将在下一个检查点停止)', 'warn');
+      showToast('已请求取消', 'warn');
+    } catch (e) {
+      pushLog(`取消失败: ${String(e)}`, 'error');
+      showToast('取消失败', 'error', String(e));
+    }
   }
 
   // ===== 文件大小格式化 =====
@@ -868,10 +883,7 @@
         />
         {#if appState.working}
           <div class="mt-3 flex justify-end">
-            <Button variant="danger" onclick={() => {
-              pushLog('取消请求已发送 (后端将在下一个检查点停止)', 'warn');
-              showToast('已请求取消', 'warn');
-            }}>
+            <Button variant="danger" onclick={onCancelTask}>
               取消
             </Button>
           </div>
@@ -895,7 +907,7 @@
           {#if appState.logs.length === 0}
             <p class="text-text-dim italic">暂无日志</p>
           {:else}
-            {#each appState.logs as log (log.time + log.text + Math.random())}
+            {#each appState.logs as log (log.id)}
               {@const Icon = logIcon[log.kind]}
               <div class="flex gap-2 leading-relaxed items-start">
                 <span class="text-text-dim/60 flex-shrink-0">{log.time}</span>

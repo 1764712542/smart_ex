@@ -39,20 +39,26 @@ pub fn rar_decompress(
             Some(entry) => {
                 let header = entry.entry();
                 if header.is_directory() {
-                    // 目录条目: 创建后跳过
-                    let dir = output.join(&header.filename);
-                    std::fs::create_dir_all(&dir)?;
+                    // Bug 7 修复: 目录路径消毒, 防止路径穿越
+                    let name = header.filename.to_string_lossy().to_string();
+                    let clean: std::path::PathBuf = std::path::Path::new(&name)
+                        .components()
+                        .filter(|c| matches!(c, std::path::Component::Normal(_) | std::path::Component::CurDir))
+                        .collect();
+                    if !clean.as_os_str().is_empty() {
+                        let dir = output.join(&clean);
+                        std::fs::create_dir_all(&dir)?;
+                    }
                     open = entry
                         .skip()
                         .map_err(|e| anyhow::anyhow!("跳过目录失败: {}", e))?;
                 } else {
-                    // 文件条目: 提取到输出目录
+                    // 文件条目: 提取到输出目录 (unrar C 库内部消毒路径)
                     open = entry
                         .extract_with_base(output)
                         .map_err(|e| anyhow::anyhow!("提取 RAR 文件失败: {}", e))?;
                 }
                 count += 1;
-                bar.set_total(count);
                 bar.inc(1);
             }
             None => break,
