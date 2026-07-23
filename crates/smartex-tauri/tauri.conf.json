@@ -38,6 +38,58 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
+    ],
+    "fileAssociations": [
+      {
+        "ext": ["zip"],
+        "name": "ZIP Archive",
+        "description": "ZIP compressed archive"
+      },
+      {
+        "ext": ["7z"],
+        "name": "7-Zip Archive",
+        "description": "7-Zip compressed archive"
+      },
+      {
+        "ext": ["rar", "r00"],
+        "name": "RAR Archive",
+        "description": "RAR compressed archive"
+      },
+      {
+        "ext": ["tar"],
+        "name": "TAR Archive",
+        "description": "TAR archive"
+      },
+      {
+        "ext": ["gz", "tgz"],
+        "name": "Gzip Compressed",
+        "description": "Gzip compressed file"
+      },
+      {
+        "ext": ["xz", "txz"],
+        "name": "XZ Compressed",
+        "description": "XZ compressed file"
+      },
+      {
+        "ext": ["zst", "tzst"],
+        "name": "Zstandard Compressed",
+        "description": "Zstandard compressed file"
+      },
+      {
+        "ext": ["bz2", "tbz2"],
+        "name": "Bzip2 Compressed",
+        "description": "Bzip2 compressed file"
+      },
+      {
+        "ext": ["lz4", "tar.lz4"],
+        "name": "LZ4 Compressed",
+        "description": "LZ4 compressed file"
+      },
+      {
+        "ext": ["enc"],
+        "name": "SmartEx Encrypted File",
+        "description": "SmartEx AES-256-GCM encrypted file"
+      }
     ]
   }
 }

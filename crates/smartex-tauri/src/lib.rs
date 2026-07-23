@@ -519,6 +519,38 @@ pub fn run() {
             pick_folder,
             save_file,
         ])
+        // 拖放文件: 把路径发给前端
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::DragDrop(drag_drop) = event {
+                use tauri::DragDropEvent;
+                match drag_drop {
+                    DragDropEvent::Enter { paths, .. } => {
+                        if let Some(path) = paths.first() {
+                            let _ = window.emit("file-hovered", path.to_string_lossy().to_string());
+                        }
+                    }
+                    DragDropEvent::Drop { paths, .. } => {
+                        if let Some(path) = paths.first() {
+                            let _ = window.emit("file-opened", path.to_string_lossy().to_string());
+                        }
+                    }
+                    DragDropEvent::Leave => {
+                        let _ = window.emit("file-drop-left", ());
+                    }
+                    _ => {}
+                }
+            }
+        })
+        // macOS: 通过 argv 接收双击打开的文件 (启动时)
+        .setup(|app| {
+            if let Some(args) = std::env::args().nth(1) {
+                let path = std::path::Path::new(&args);
+                if path.exists() {
+                    let _ = app.emit("file-opened", path.to_string_lossy().to_string());
+                }
+            }
+            Ok(())
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
