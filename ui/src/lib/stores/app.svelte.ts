@@ -291,11 +291,13 @@ export async function fetchContextSuggestion(intent: CompressionIntent): Promise
 
 export function applyContextSuggestion(s: FormatSuggestion): void {
   appState.format = s.format;
-  appState.level = s.level;
+  // 级别可能超出当前格式范围, 钳制到有效区间
+  const range = levelRange();
+  appState.level = Math.max(range.min, Math.min(range.max, s.level));
   appState.splitSize = s.split_size ?? '';
   autoFillOutput();
   closeContextWizard();
-  pushLog(`已应用推荐: ${s.format} (级别 ${s.level})`, 'success');
+  pushLog(`已应用推荐: ${s.format} (级别 ${appState.level})`, 'success');
   showToast('已应用智能推荐', 'success', s.reason);
 }
 

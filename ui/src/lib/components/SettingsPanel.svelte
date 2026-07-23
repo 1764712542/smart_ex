@@ -354,7 +354,20 @@
               <Icon size={15} class={settings.enabledModes[row.key] ? 'text-accent' : 'text-text-dim'} />
               <span class="text-sm text-text">{row.label}</span>
             </div>
-            {@render ToggleSwitch(settings.enabledModes[row.key], () => toggleMode(row.key))}
+            <button
+              onclick={() => toggleMode(row.key)}
+              role="switch"
+              aria-checked={settings.enabledModes[row.key]}
+              class="relative w-9 h-5 rounded-full transition-colors duration-200 flex-shrink-0 {settings.enabledModes[row.key]
+                ? 'bg-accent'
+                : 'bg-bg-hover border border-border'}"
+            >
+              <span
+                class="absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform duration-200 {settings.enabledModes[row.key]
+                  ? 'translate-x-4'
+                  : 'translate-x-0'}"
+              ></span>
+            </button>
           </div>
         {/each}
       </div>
@@ -377,7 +390,20 @@
                 <div class="text-xs text-text-dim truncate">{row.desc}</div>
               </div>
             </div>
-            {@render ToggleSwitch(settings.enabledFeatures[row.key], () => toggleFeature(row.key))}
+            <button
+              onclick={() => toggleFeature(row.key)}
+              role="switch"
+              aria-checked={settings.enabledFeatures[row.key]}
+              class="relative w-9 h-5 rounded-full transition-colors duration-200 flex-shrink-0 {settings.enabledFeatures[row.key]
+                ? 'bg-accent'
+                : 'bg-bg-hover border border-border'}"
+            >
+              <span
+                class="absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow-sm transition-transform duration-200 {settings.enabledFeatures[row.key]
+                  ? 'translate-x-4'
+                  : 'translate-x-0'}"
+              ></span>
+            </button>
           </div>
         {/each}
       </div>

@@ -83,10 +83,13 @@ pub struct TestResult {
 
 #[derive(Deserialize)]
 pub enum RecipientDto {
-    #[serde(rename = "self")]
+    #[serde(rename = "self", alias = "self_")]
     Self_,
+    #[serde(rename = "colleague")]
     Colleague,
+    #[serde(rename = "external")]
     External,
+    #[serde(rename = "public")]
     Public,
 }
 
