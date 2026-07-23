@@ -53,6 +53,7 @@
     showToast,
     dismissToast,
     pickInputFile,
+    pickInputFolder,
     pickOutputFile,
     pickOutputFolder,
     autoFillOutput,
@@ -553,9 +554,14 @@
                     : '选择文件或文件夹...'}
                 class="flex-1 min-w-0 px-3 py-2 rounded-mac-sm bg-bg-hover border border-border text-text placeholder:text-text-dim/60 focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/30 transition-all text-sm font-mono"
               />
-              <Button variant="secondary" onclick={() => pickInputFile()} disabled={appState.working}>
+              <Button variant="secondary" onclick={() => pickInputFile()} disabled={appState.working} title="选择文件">
                 <FileInput size={16} />
               </Button>
+              {#if appState.mode === 'compress' || appState.mode === 'encrypt'}
+                <Button variant="secondary" onclick={() => pickInputFolder()} disabled={appState.working} title="选择文件夹">
+                  <FolderOpen size={16} />
+                </Button>
+              {/if}
             </div>
             <p class="text-xs text-text-dim/70 mt-1">支持拖放文件到窗口</p>
           </div>

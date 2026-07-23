@@ -306,6 +306,21 @@ export async function pickInputFile(): Promise<void> {
   }
 }
 
+export async function pickInputFolder(): Promise<void> {
+  if (appState.working) return;
+  try {
+    const result = await api.pickFolder();
+    if (result) {
+      appState.inputPath = result;
+      autoFillOutput();
+      pushLog(`已选择文件夹: ${result}`, 'info');
+    }
+  } catch (e) {
+    pushLog(`选择文件夹失败: ${String(e)}`, 'error');
+    showToast('选择文件夹失败', 'error', String(e));
+  }
+}
+
 export async function pickOutputFile(): Promise<void> {
   if (appState.working) return;
   try {

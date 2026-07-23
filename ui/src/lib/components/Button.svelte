@@ -11,6 +11,7 @@
     onclick?: (e: MouseEvent) => void;
     children?: Snippet;
     class?: string;
+    title?: string;
   }
 
   let {
@@ -20,6 +21,7 @@
     onclick,
     children,
     class: className = '',
+    title,
   }: Props = $props();
 
   const variantClass: Record<Variant, string> = {
@@ -37,6 +39,7 @@
     : 'cursor-pointer'}"
   disabled={isDisabled}
   {onclick}
+  {title}
 >
   {#if loading}
     <LoaderCircle class="w-4 h-4 animate-spin inline-block mr-2 -mt-0.5" />
